@@ -1843,3 +1843,74 @@ test('admin upload dedup keys on file bytes (sha256), not filename: same content
     kb.close();
   }
 });
+
+test('uploading the same bytes again after a DELETE re-indexes them (sha256 dedup must not block the lifecycle)', async () => {
+  const { kb, server, port } = await startServer();
+  // deleteDoc purges docs/chunks/fts rows, so the sha256 is freed: re-uploading
+  // the exact same bytes must index a FRESH doc instead of reporting duplicate.
+  // A dedup cache that survived the delete (or dedup keyed on anything but the
+  // live docs table) would break the delete→re-upload admin workflow.
+  const contents = '法医鉴定收费标准 3000元起，出诊费另计，报告出具周期十个工作日。';
+  const boundary = '----rd-reidx';
+  const part = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="forensic.md"\r\nContent-Type: text/markdown\r\n\r\n${contents}\r\n`
+  );
+  const upload = (body) =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/admin/upload',
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+        }
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+  const del = (id) =>
+    new Promise((resolve, reject) => {
+      http
+        .request({ host: 'localhost', port, path: `/api/admin/docs/${id}`, method: 'DELETE' }, (r) => {
+          r.resume();
+          r.on('end', () => resolve({ status: r.statusCode }));
+        })
+        .on('error', reject)
+        .end();
+    });
+  try {
+    const first = await upload(Buffer.concat([part, Buffer.from(`--${boundary}--\r\n`)]));
+    assert.strictEqual(first.status, 200);
+    assert.deepStrictEqual(first.body.results[0], { filename: 'forensic.md', action: 'indexed', docId: 1, chunks: 1 });
+
+    const delRes = await del(first.body.results[0].docId);
+    assert.strictEqual(delRes.status, 200);
+    const afterDel = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(afterDel.body.docs.length, 0, 'DELETE leaves an empty list');
+
+    const second = await upload(Buffer.concat([part, Buffer.from(`--${boundary}--\r\n`)]));
+    assert.strictEqual(second.status, 200);
+    assert.deepStrictEqual(
+      second.body.results[0],
+      { filename: 'forensic.md', action: 'indexed', docId: 2, chunks: 1 },
+      'same bytes re-uploaded after a DELETE must index fresh, not duplicate'
+    );
+
+    const docs = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(docs.body.docs.length, 1);
+    assert.strictEqual(docs.body.docs[0].id, 2, 'the re-upload lives as a brand new row');
+
+    const ans = await post(`http://localhost:${port}/api/chat`, { query: '法医鉴定多少钱' });
+    assert.ok(ans.body.citations.length >= 1, 'the re-indexed content is retrievable again');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
