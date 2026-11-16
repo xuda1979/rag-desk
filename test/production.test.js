@@ -231,6 +231,35 @@ test('prod: 50MB upload limit enforced (LIMIT_FILE_SIZE -> 413 JSON)', async () 
   }
 });
 
+test('prod: thrown engine errors become stable JSON 500s, not HTML stack traces', async () => {
+  const failingKb = {
+    engineInfo: () => {
+      throw new Error('boom: corrupt index');
+    },
+    getQueryStats: () => {
+      throw new Error('boom: corrupt index');
+    },
+    answer: () => ({ query: 'x', answer: '', citations: [] }),
+    logQuery: () => {},
+    getAllDocs: () => [],
+  };
+  const app = buildApp(failingKb, {});
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, () => resolve(s));
+  });
+  try {
+    const port = server.address().port;
+    for (const reqPath of ['/api/health', '/api/admin/stats']) {
+      const res = await req(port, { reqPath });
+      assert.strictEqual(res.status, 500);
+      assert.match(res.headers['content-type'], /application\/json/);
+      assert.deepStrictEqual(res.body, { error: 'boom: corrupt index' });
+    }
+  } finally {
+    server.close();
+  }
+});
+
 test('prod: server.js boot seeds a fresh DB, gates admin, answers chat, and skips re-seed on later boots', async () => {
   const bootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rd-boot-'));
   const dbPath = path.join(bootDir, 'boot.db');
