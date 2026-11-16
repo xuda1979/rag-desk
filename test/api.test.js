@@ -90,10 +90,22 @@ test('server-side: /api/chat returns offline answer with citation after ingest',
 
 test('server-side: /api/chat 400 on empty query', async () => {
   const { kb, server, port } = await startServer();
-  const res = await post(`http://localhost:${port}/api/chat`, {});
-  assert.strictEqual(res.status, 400);
-  server.close();
-  kb.close();
+  // demo.js always sends a query, but a broken embed/curl could send an empty
+  // body or an explicit empty string; both must surface the exact same stable
+  // JSON 400 the UIs render, no blank-hit fallback and no HTML.
+  try {
+    for (const payload of [{}, { query: '' }, { query: '   ' }]) {
+      const res = await post(`http://localhost:${port}/api/chat`, payload);
+      assert.strictEqual(res.status, 400, `payload ${JSON.stringify(payload)} must 400`);
+      assert.deepStrictEqual(res.body, { error: 'query is required' }, 'blank queries share one literal 400 body');
+    }
+    // nothing was logged for a rejected query
+    const stats = await get(`http://localhost:${port}/api/admin/stats`);
+    assert.deepStrictEqual(stats.body.stats, { total: 0, with_answer: 0 }, 'rejected queries are not counted');
+  } finally {
+    server.close();
+    kb.close();
+  }
 });
 
 test('server-side: /api/chat rejects whitespace-only queries and trims padded ones', async () => {
