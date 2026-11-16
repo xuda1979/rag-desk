@@ -304,6 +304,59 @@ test('admin upload endpoint reports per-file results for a mixed batch', async (
   kb.close();
 });
 
+test('admin upload endpoint reports duplicate when the same bytes are re-uploaded', async () => {
+  const { kb, server, port } = await startServer();
+  // admin.js renders action==='duplicate' as 已存在跳过; the dedup keys on the
+  // file sha256, so re-uploading the same bytes must report it at the wire.
+  const contents = 'nullam_tempus_duopoints 律师事务所收费标准按小时计费，先签合同后服务。';
+  const boundary = '----rd-dup';
+  const part = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="fee.md"\r\nContent-Type: text/markdown\r\n\r\n${contents}\r\n`
+  );
+  const firstBody = Buffer.concat([part, Buffer.from(`--${boundary}--\r\n`)]);
+  const secondBody = Buffer.concat([part, Buffer.from(`--${boundary}--\r\n`)]);
+  try {
+    const upload = (body) =>
+      new Promise((resolve, reject) => {
+        const req = http.request(
+          {
+            host: 'localhost',
+            port,
+            path: '/api/admin/upload',
+            method: 'POST',
+            headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length },
+          },
+          (r) => {
+            let out = '';
+            r.on('data', (c) => (out += c));
+            r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+          }
+        );
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+      });
+
+    const first = await upload(firstBody);
+    assert.strictEqual(first.status, 200);
+    const r1 = first.body.results[0];
+    assert.strictEqual(r1.action, 'indexed');
+    assert.strictEqual(typeof r1.docId, 'number');
+
+    const second = await upload(secondBody);
+    assert.strictEqual(second.status, 200);
+    const r2 = second.body.results[0];
+    assert.strictEqual(r2.action, 'duplicate', 're-upload of identical bytes must report duplicate');
+    assert.strictEqual(r2.docId, r1.docId, 'duplicate must point at the original doc, not a new one');
+
+    const docs = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(docs.body.docs.length, 1, 'repeat upload must not add a second row');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin upload endpoint ingests PDF/DOCX/CSV fixtures end-to-end', async () => {
   const { kb, server, port } = await startServer();
   const boundary = '----rd-ext';
