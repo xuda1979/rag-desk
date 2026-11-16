@@ -1,4 +1,5 @@
 node_modules/
 data/
+.future-code/
 *.log
 .DS_Store
