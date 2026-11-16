@@ -446,6 +446,26 @@ test('admin upload endpoint ingests PDF/DOCX/CSV fixtures end-to-end', async () 
   kb.close();
 });
 
+test('admin docs list orders newest first by descending id, matching the admin table render', async () => {
+  const { kb, server, port } = await startServer();
+  try {
+    // seed three docs in a known sequence so id order is unambiguous
+    await kb.ingestBuffer('a.md', Buffer.from('第一份文档内容。'));
+    await kb.ingestBuffer('b.md', Buffer.from('第二份文档内容。'));
+    await kb.ingestBuffer('c.md', Buffer.from('第三份文档内容。'));
+
+    const docs = await get(`http://localhost:${port}/api/admin/docs`);
+    const names = docs.body.docs.map((d) => d.filename);
+    const ids = docs.body.docs.map((d) => d.id);
+    assert.strictEqual(docs.body.docs.length, 3);
+    assert.deepStrictEqual(ids, [3, 2, 1], 'newest upload first, strongest ordering contract');
+    assert.deepStrictEqual(names, ['c.md', 'b.md', 'a.md'], 'admin table renders top-down from this list');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin upload endpoint rejects an unsupported file type', async () => {
   const { kb, server, port } = await startServer();
   const boundary = '----rd-type';
