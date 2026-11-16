@@ -184,6 +184,19 @@ test('ingestBuffer stores the mime from upload metadata and rejects unknown kind
   kb.close();
 });
 
+test('ingestBuffer surfaces corrupt PDF extraction as a clean per-file error', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  const r = await kb.ingestBuffer('broken.pdf', Buffer.from('not a pdf at all'));
+  assert.strictEqual(r.action, 'error');
+  assert.match(r.error, /Invalid PDF structure/);
+  assert.strictEqual(kb.getAllDocs().length, 0, 'rejected PDF never reaches storage');
+  const empty = await kb.ingestBuffer('empty.pdf', Buffer.alloc(0));
+  assert.strictEqual(empty.action, 'error');
+  assert.match(empty.error, /zero bytes/);
+  assert.strictEqual(kb.getAllDocs().length, 0);
+  kb.close();
+});
+
 test('logQuery + getQueryLogs roundtrip (AC6)', () => {
   const kb = new KnowledgeBase(tempDb());
   kb.logQuery({ query: '测试问题', domain: 'legal', matched: 3, topScore: 0.6, topDocId: 1, source: 'api' });

@@ -72,6 +72,12 @@ test('extractPdf extracts CJK text from the committed PDF fixture', async () => 
   assert.doesNotMatch(text, /[\u0000\uFFFD]/);
 });
 
+test('extractPdf rejects corrupt, truncated and empty input with a clear message', async () => {
+  await assert.rejects(() => extractPdf(Buffer.from('not a pdf at all')), /Invalid PDF structure/);
+  await assert.rejects(() => extractPdf(Buffer.from('%PDF-1.4\n123')), /Invalid PDF structure/);
+  await assert.rejects(() => extractPdf(Buffer.alloc(0)), /zero bytes/);
+});
+
 test('extractDocx fails loudly on corrupt or docx-less input', () => {
   const { zipSync, strToU8 } = require('fflate');
   // a valid zip that is missing word/document.xml
