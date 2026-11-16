@@ -1248,19 +1248,56 @@ test('admin upload with no files returns a stable JSON 400', async () => {
 });
 test('/api/domains returns preset domains with labels and example questions', async () => {
   const { kb, server, port } = await startServer();
-  const res = await get(`http://localhost:${port}/api/domains`);
-  assert.strictEqual(res.status, 200);
-  const ids = res.body.domains.map((d) => d.id);
-  assert.ok(ids.includes('legal'));
-  assert.ok(ids.includes('medical'));
-  assert.ok(ids.includes('procurement'));
-  assert.ok(ids.includes('general'));
-  const legal = res.body.domains.find((d) => d.id === 'legal');
-  assert.match(legal.label, /法律/);
-  assert.ok(Array.isArray(legal.examples) && legal.examples.length > 0);
-  assert.ok(res.body.domains.every((d) => d.greeting));
-  server.close();
-  kb.close();
+  try {
+    const res = await get(`http://localhost:${port}/api/domains`);
+    assert.strictEqual(res.status, 200);
+    const ids = res.body.domains.map((d) => d.id);
+    assert.ok(ids.includes('legal'));
+    assert.ok(ids.includes('medical'));
+    assert.ok(ids.includes('procurement'));
+    assert.ok(ids.includes('general'));
+    const legal = res.body.domains.find((d) => d.id === 'legal');
+    assert.match(legal.label, /法律/);
+    assert.ok(Array.isArray(legal.examples) && legal.examples.length > 0);
+    assert.ok(res.body.domains.every((d) => d.greeting));
+
+    // demo.js renders every preset entry: fillSelect shows d.label, ask() swaps
+    // the greeting and example chips from d.greeting/d.examples. Lock the exact
+    // per-domain content so a preset change that breaks the demo page fails.
+    const byId = Object.fromEntries(res.body.domains.map((d) => [d.id, d]));
+    assert.strictEqual(byId.legal.label, '法律 · 律师事务所');
+    assert.strictEqual(
+      byId.legal.greeting,
+      '您好，我是律所智能问答助手。您可以询问合同、诉讼流程、收费标准、法律法规等问题。'
+    );
+    assert.deepStrictEqual(byId.legal.examples, [
+      '律师咨询费怎么收取？',
+      '劳动仲裁的流程是什么？',
+      '合同纠纷可以起诉吗？',
+    ]);
+    assert.strictEqual(byId.medical.label, '医疗 · 诊所');
+    assert.strictEqual(
+      byId.medical.greeting,
+      '您好，我是诊所在线导诊助手。可以询问挂号、科室、复诊流程与医保报销等问题。'
+    );
+    assert.deepStrictEqual(byId.medical.examples, ['挂号需要带什么？', '儿童接种疫苗时间？', '可以刷医保卡吗？']);
+    assert.strictEqual(byId.procurement.label, '招采 · 中标公告');
+    assert.strictEqual(
+      byId.procurement.greeting,
+      '您好，这里是招投标信息助手。可以查询公告要点、投标要求、截止时间与联系方式。'
+    );
+    assert.deepStrictEqual(byId.procurement.examples, [
+      '这个项目什么时候截止投标？',
+      '中标人是谁？',
+      '项目预算金额是多少？',
+    ]);
+    assert.strictEqual(byId.general.label, '通用 · General');
+    assert.strictEqual(byId.general.greeting, '您好，这是您专属的知识库问答助手。');
+    assert.deepStrictEqual(byId.general.examples, [], 'general exposes no preset example chips');
+  } finally {
+    server.close();
+    kb.close();
+  }
 });
 
 test('/api/admin/stats reports total and matched query counts', async () => {
