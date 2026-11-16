@@ -1914,3 +1914,35 @@ test('uploading the same bytes again after a DELETE re-indexes them (sha256 dedu
     kb.close();
   }
 });
+
+test('admin docs list carries the exact file kind per format the table renders', async () => {
+  const { kb, server, port } = await startServer();
+  try {
+    // each supported fixture maps to a distinct kind via fileKindOf (extractors.fileKind)
+    const kinds = {
+      'law-services.docx': 'docx',
+      'clinic-guide.pdf': 'pdf',
+      'faq-transfer.csv': 'csv',
+      'notice-provider.txt': 'text',
+      'vaccine.md': 'markdown',
+    };
+    for (const [name, expected] of Object.entries(kinds)) {
+      const buf = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'corpus', name));
+      const res = await kb.ingestBuffer(name, buf);
+      assert.strictEqual(res.action, 'indexed', `${name} should index`);
+    }
+
+    const docs = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(docs.body.docs.length, Object.keys(kinds).length);
+
+    // every row's kind must equal the per-extension mapping, else the admin
+    // table's kind column (admin.js renders d.kind) would show wrong labels
+    const byName = new Map(docs.body.docs.map((d) => [d.filename, d.kind]));
+    for (const [name, expected] of Object.entries(kinds)) {
+      assert.strictEqual(byName.get(name), expected, `${name} should list kind ${expected}`);
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
