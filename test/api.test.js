@@ -608,6 +608,37 @@ test('/api/admin/logs carries the top-doc filename join for answered queries', a
   kb.close();
 });
 
+test('/api/chat citations carry the docId/document/paragraph/excerpt fields the frontends render', async () => {
+  const { kb, server, port } = await startServer();
+  // demo.js renders c.document, §c.paragraph and c.excerpt (sliced to 160
+  // chars); widget.js renders c.document and §c.paragraph. Lock the wire shape
+  // so a storage/answer refactor cannot drop a field the UIs depend on.
+  await kb.ingestBuffer(
+    'guide.md',
+    Buffer.from('疫苗接种时间每周二、周四、周六上午，请携带预防接种证提前预约。儿童接种疫苗前请确认无发烧。')
+  );
+  const chat = await post(`http://localhost:${port}/api/chat`, { query: '儿童接种疫苗' });
+  assert.strictEqual(chat.status, 200);
+  assert.ok(chat.body.citations.length >= 1, 'query must hit the ingested doc');
+  for (const c of chat.body.citations) {
+    assert.strictEqual(typeof c.docId, 'number');
+    assert.ok(c.docId > 0);
+    assert.strictEqual(typeof c.document, 'string');
+    assert.ok(c.document.includes('.'), 'document should carry the filename');
+    assert.ok(Number.isInteger(c.paragraph) && c.paragraph >= 1, 'paragraph must be a 1-based integer');
+    assert.strictEqual(typeof c.excerpt, 'string');
+    assert.ok(c.excerpt.length > 0, 'excerpt must be populated text the demo page renders');
+  }
+  // top must mirror the first citation's fields (same doc, same excerpt)
+  const first = chat.body.citations[0];
+  assert.strictEqual(chat.body.top.docId, first.docId);
+  assert.strictEqual(chat.body.top.document, first.document);
+  assert.strictEqual(chat.body.top.paragraph, first.paragraph);
+  assert.strictEqual(chat.body.top.excerpt, first.excerpt);
+  server.close();
+  kb.close();
+});
+
 test('widget script is served and self-contained', async () => {
   const { kb, server, port } = await startServer();
   const res = await get(`http://localhost:${port}/widget.js`);
