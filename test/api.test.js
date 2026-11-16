@@ -95,6 +95,17 @@ test('server-side: /api/chat 400 on empty query', async () => {
   kb.close();
 });
 
+test('server-side: unknown domain falls back to general preset', async () => {
+  const { kb, server, port } = await startServer();
+  const unknown = await post(`http://localhost:${port}/api/chat`, { query: 'xyz', domain: 'slackbot' });
+  const omitted = await post(`http://localhost:${port}/api/chat`, { query: 'xyz' });
+  assert.strictEqual(unknown.status, 200);
+  assert.strictEqual(unknown.body.domain, 'general');
+  assert.strictEqual(unknown.body.answer, omitted.body.answer, 'same fallback as omitted domain');
+  server.close();
+  kb.close();
+});
+
 test('server-side: /api/health reports offline engine', async () => {
   const { kb, server, port } = await startServer();
   const res = await get(`http://localhost:${port}/api/health`);
