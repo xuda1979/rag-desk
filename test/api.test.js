@@ -160,20 +160,31 @@ test('server-side: a valid domain selection is honored in the answer phrasing on
   }
 });
 
-test('server-side: /api/health reports offline engine', async () => {
+test('server-side: /api/health reports the full offline engine payload', async () => {
   const { kb, server, port } = await startServer();
-  const res = await get(`http://localhost:${port}/api/health`);
-  assert.strictEqual(res.body.ok, true);
-  assert.deepStrictEqual(res.body.mode, 'offline');
-  assert.strictEqual(res.body.llmEnabled, false);
-  assert.strictEqual(res.body.engine.fts, true, 'FTS5 backend advertised');
-  assert.strictEqual(res.body.engine.bm25, true, 'BM25 ranking advertised');
-  assert.strictEqual(res.body.engine.embedding, false, 'no embeddings in offline mode');
-  assert.strictEqual(res.body.engine.llm, false, 'no LLM in offline mode');
-  assert.match(res.body.engine.tokenizer, /bigram-cjk/, 'tokenizer described');
-  assert.deepStrictEqual(res.body.domains, ['legal', 'medical', 'procurement', 'general']);
-  server.close();
-  kb.close();
+  try {
+    const res = await get(`http://localhost:${port}/api/health`);
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.body, {
+      ok: true,
+      engine: {
+        fts: true,
+        bm25: true,
+        embedding: false,
+        llm: false,
+        tokenizer: 'bigram-cjk + unicode61',
+        // the live db path, so operators can tell which store the running
+        // instance actually serves (locked at the engine level too)
+        storage: kb.storage.dbPath,
+      },
+      domains: ['legal', 'medical', 'procurement', 'general'],
+      mode: 'offline',
+      llmEnabled: false,
+    });
+  } finally {
+    server.close();
+    kb.close();
+  }
 });
 
 test('server-side: oversized JSON request body maps to 413 JSON error, not HTML', async () => {
