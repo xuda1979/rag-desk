@@ -124,6 +124,10 @@
     try {
       const res = await adminFetch('/api/admin/upload', { method: 'POST', body: fd });
       const data = await res.json();
+      if (!res.ok) {
+        uploadResult.textContent = `上传失败（HTTP ${res.status}）：${(data && data.error) || '服务器未返回错误详情'}`;
+        return;
+      }
       uploadResult.textContent = (data.results || [])
         .map((r) => `${r.filename}: ${r.action === 'indexed' ? `已索引（${r.chunks} 分块）` : r.action}`)
         .join('；');

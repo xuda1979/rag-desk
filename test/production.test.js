@@ -52,16 +52,18 @@ function req(port, { method = 'GET', reqPath = '/', headers = {}, body = null })
 test('prod: admin endpoints are token-gated when RAGDESK_ADMIN_TOKEN is set', async () => {
   const { kb, server, port } = await startServer({ adminToken: 's3cret' });
   try {
-    // no token -> 401
+    // no token -> 401 with a JSON error body frontends can display
     const deny = await req(port, { reqPath: '/api/admin/docs' });
     assert.strictEqual(deny.status, 401);
+    assert.match(deny.body.error, /unauthorized/);
 
-    // wrong token -> 401
+    // wrong token -> 401 with a JSON error body frontends can display
     const wrong = await req(port, {
       reqPath: '/api/admin/docs',
       headers: { 'x-admin-token': 'nope' },
     });
     assert.strictEqual(wrong.status, 401);
+    assert.match(wrong.body.error, /unauthorized/);
 
     // correct token -> 200
     const ok = await req(port, {
@@ -95,6 +97,9 @@ test('prod: chat endpoint is bearer-gated when RAGDESK_CHAT_TOKEN is set', async
       body: JSON.stringify({ query: 'hello' }),
     });
     assert.strictEqual(deny.status, 401);
+    // widget + demo rely on the JSON error body to surface the rejection
+    assert.strictEqual(typeof deny.body.error, 'string');
+    assert.ok(deny.body.error.length > 0);
 
     const ok = await req(port, {
       method: 'POST',

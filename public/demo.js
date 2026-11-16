@@ -112,7 +112,11 @@
         body: JSON.stringify({ query: q, domain: domainSelect.value }),
       });
       const data = await res.json();
-      thinking.innerHTML = renderBotMessage(data);
+      if (!res.ok) {
+        thinking.innerHTML = `请求失败（HTTP ${res.status}）：${esc((data && data.error) || '服务器未返回错误详情')}`;
+      } else {
+        thinking.innerHTML = renderBotMessage(data);
+      }
     } catch (err) {
       thinking.innerHTML = `检索失败：${esc(err.message)}`;
     }
