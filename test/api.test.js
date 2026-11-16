@@ -364,6 +364,31 @@ test('DELETE of a missing document returns 404', async () => {
   kb.close();
 });
 
+test('DELETE of an existing document removes it from list and search', async () => {
+  const { kb, server, port } = await startServer();
+  await kb.ingestBuffer('del.md', Buffer.from('疫苗接种时间每周二、周四、周六上午。'));
+  const docId = kb.getAllDocs()[0].id;
+
+  const res = await new Promise((resolve, reject) => {
+    http
+      .request({ host: 'localhost', port, path: `/api/admin/docs/${docId}`, method: 'DELETE' }, (r) => {
+        let out = '';
+        r.on('data', (c) => (out += c));
+        r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+      })
+      .on('error', reject)
+      .end();
+  });
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body, { ok: true });
+
+  const docs = await get(`http://localhost:${port}/api/admin/docs`);
+  assert.strictEqual(docs.body.docs.length, 0, 'doc must leave the admin list');
+  assert.strictEqual(kb.searchRaw('疫苗接种').chunks.length, 0, 'deleted content must not be retrievable');
+  server.close();
+  kb.close();
+});
+
 test('/api/chat tolerates a malformed limit (defaults instead of 500)', async () => {
   const { kb, server, port } = await startServer();
   const ok = await post(`http://localhost:${port}/api/chat`, { query: 'xyz', limit: 'abc' });
