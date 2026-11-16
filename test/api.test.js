@@ -969,6 +969,28 @@ test('static pages served', async () => {
   kb.close();
 });
 
+test('static pages carry the element ids demo.js and admin.js read at startup', async () => {
+  const { kb, server, port } = await startServer();
+  try {
+    // demo.js starts by resolving every one of these via getElementById;
+    // a missing id silently kills the page (null.querySelector throws).
+    const idx = await get(`http://localhost:${port}/`);
+    assert.strictEqual(idx.status, 200);
+    for (const id of ['domain-select', 'greeting', 'chat', 'ask-form', 'ask-input', 'examples']) {
+      assert.ok(idx.body.includes(`id="${id}"`), `demo page must carry id="${id}"`);
+    }
+    // admin.js resolves its own set; both pages must keep wiring up.
+    const admin = await get(`http://localhost:${port}/admin`);
+    assert.strictEqual(admin.status, 200);
+    for (const id of ['file-input', 'upload-btn', 'upload-result', 'stats', 'docs-body', 'chunks-card', 'chunks-doc', 'chunks-body', 'logs-body']) {
+      assert.ok(admin.body.includes(`id="${id}"`), `admin page must carry id="${id}"`);
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('CORS preflight passes without credentials even when endpoint auth is on', async () => {
   const { kb, server, port } = await startServer({ adminToken: 'adm', chatToken: 'ch0' });
   // browsers always send the preflight before the credentialed request; a
