@@ -1,0 +1,122 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert');
+const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
+
+const { KnowledgeBase } = require('../src/lib/knowledge');
+const { chunkText } = require('../src/lib/chunker');
+const { ensureCorpusFiles } = require('../scripts/seed-fixtures');
+
+function tempDb() {
+  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ragdesk-test-')), 'test.db');
+}
+
+test('chunker: splits long text into overlapping windows with paragraph packing', () => {
+  const long = Array.from({ length: 60 }, (_, i) => `第${i}句内容。`).join('');
+  const chunks = chunkText(long + '\n\n' + '短段。');
+  assert.ok(chunks.length >= 3, `expected many chunks, got ${chunks.length}`);
+  const total = chunks.reduce((s, c) => s + c.text.length, 0);
+  assert.ok(total > long.length, 'overlap should keep total > source');
+  assert.ok(chunks.every((c) => c.text.length > 0));
+  assert.strictEqual(chunks[chunks.length - 1].text, '短段。');
+});
+
+test('chunker: single paragraph with no blank lines degrades gracefully', () => {
+  const one = '这是一段比较长的没有空行的文字，为了测试分块逻辑需要重复很多次。'.repeat(30);
+  const chunks = chunkText(one);
+  assert.ok(chunks.length >= 2);
+  assert.ok(chunks.every((c) => c.text.trim().length > 0));
+});
+
+test('fts: chinese bigram query finds the right chunk (AC1 core)', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  const result = await kb.ingestBuffer('a.md', Buffer.from(
+    '我们提供法律咨询服务。律师咨询费按每小时 300 元收取。当面咨询需提前预约。'
+  ));
+  assert.strictEqual(result.action, 'indexed');
+
+  const { chunks } = kb.searchRaw('律师咨询费怎么收取');
+  assert.ok(chunks.length > 0, 'should find a chunk');
+  assert.strictEqual(chunks[0].filename, 'a.md');
+  assert.match(chunks[0].body, /咨询费/);
+
+  const ans = kb.answer('律师咨询费怎么收取');
+  assert.strictEqual(ans.mode, 'offline-retrieval');
+  assert.ok(ans.top, 'top citation present');
+  assert.strictEqual(ans.top.document, 'a.md');
+  assert.strictEqual(ans.top.paragraph, 1);
+  assert.match(ans.answer, /咨询费/);
+  kb.close();
+});
+
+test('tok found by ascii word + numbers (CJK-adjacent)', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  await kb.ingestBuffer('ab.txt', Buffer.from('本机构全国客服电话 400-123-4567。'));
+  const ans = kb.answer('400-123-4567');
+  assert.ok(ans.top, 'should still match by number query');
+  kb.close();
+});
+
+test('duplicate upload is idempotent (AC5)', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  const buf = Buffer.from('医院儿科在门诊楼二楼，周一至周日全天开诊。');
+  const r1 = await kb.ingestBuffer('c.md', buf);
+  const r2 = await kb.ingestBuffer('c.md', buf);
+  assert.strictEqual(r1.action, 'indexed');
+  assert.strictEqual(r2.action, 'duplicate');
+  assert.strictEqual(kb.getAllDocs().length, 1);
+  kb.close();
+});
+
+test('ingest then delete keeps index clean', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  await kb.ingestBuffer('d.md', Buffer.from('疫苗接种时间每周二、周四、周六上午。'));
+  const doc = kb.getAllDocs()[0];
+  assert.strictEqual(kb.getDocChunks(doc.id).length, 1);
+  kb.deleteDoc(doc.id);
+  assert.strictEqual(kb.getAllDocs().length, 0);
+  const { chunks } = kb.searchRaw('疫苗接种');
+  assert.strictEqual(chunks.length, 0);
+  kb.close();
+});
+
+test('offline mode returns answer without any LLM/embedding (AC3)', () => {
+  const kb = new KnowledgeBase(tempDb());
+  const ans = kb.answer('法学');
+  assert.strictEqual(ans.mode, 'offline-retrieval');
+  assert.strictEqual(ans.llm, false);
+  assert.ok(Array.isArray(ans.citations));
+  kb.close();
+});
+
+test('answer on empty corpus gives graceful fallback', () => {
+  const kb = new KnowledgeBase(tempDb());
+  const ans = kb.answer('完全不存在的问题关键词');
+  assert.strictEqual(ans.answer, kb.getSetting('__nope__') ? '' : String(ans.answer).length > 0 ? ans.answer : '');
+  assert.strictEqual(ans.top, null);
+  assert.deepStrictEqual(ans.citations, []);
+  kb.close();
+});
+
+test('logQuery + getQueryLogs roundtrip (AC6)', () => {
+  const kb = new KnowledgeBase(tempDb());
+  kb.logQuery({ query: '测试问题', domain: 'legal', matched: 3, topScore: 0.6, topDocId: 1, source: 'api' });
+  const logs = kb.getQueryLogs();
+  assert.strictEqual(logs.length, 1);
+  assert.strictEqual(logs[0].query, '测试问题');
+  assert.strictEqual(logs[0].domain, 'legal');
+  kb.close();
+});
+
+test('LLM optional path stays OFF by default; mock summarizer works', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  await kb.ingestBuffer('l.md', Buffer.from('合同纠纷在被告住所地人民法院起诉，诉讼时效三年。'));
+  const ans = await kb.answerWithLlm('合同纠纷在哪里起诉', { llm: true });
+  assert.strictEqual(ans.mode, 'llm');
+  assert.strictEqual(ans.llm, true);
+  assert.ok(ans.answer.length > 0);
+  kb.close();
+});

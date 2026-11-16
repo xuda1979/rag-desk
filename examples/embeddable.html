@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>示例站点 · 嵌入浮窗</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+           max-width: 760px; margin: 40px auto; padding: 0 16px; color: #1f2733; line-height: 1.6; }
+    h1 { font-size: 26px; }
+    .card { border: 1px solid #e3e6ea; border-radius: 12px; padding: 18px; margin: 16px 0; background: #fff; }
+    code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>某某诊所（示例官网）</h1>
+  <p>欢迎访问我们的示例页面。右下角的聊天按钮即 embedded 浮窗，由
+    <code>widget.js</code> 提供，点击即可与本机 RAG-Desk 的 /api/chat 对话。</p>
+
+  <div class="card">
+    <h2>嵌入方式</h2>
+    <pre>&lt;script
+  src="http://localhost:3000/widget.js"
+  data-api="http://localhost:3000/api/chat"
+  data-domain="medical"
+  data-title="诊所在线咨询"
+  data-greeting="您好，我是诊所在线导诊助手。"&gt;&lt;/script&gt;</pre>
+  </div>
+
+  <div class="card">
+    <h2>常见问题</h2>
+    <ul>
+      <li>挂号需要带什么？</li>
+      <li>儿童接种疫苗时间？</li>
+      <li>可以刷医保卡吗？</li>
+    </ul>
+  </div>
+
+  <!-- embeddable chat float widget -->
+  <script
+    src="http://localhost:3000/widget.js"
+    data-api="http://localhost:3000/api/chat"
+    data-domain="medical"
+    data-title="诊所在线咨询"
+    data-greeting="您好，我是诊所在线导诊助手，请问有什么可以帮您？"></script>
+</body>
+</html>

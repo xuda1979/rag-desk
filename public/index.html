@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RAG-Desk · 离线知识问答演示</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="demo-page">
+  <main class="demo-shell">
+    <header class="demo-header">
+      <h1>RAG-Desk</h1>
+      <p class="subtitle">垂直行业 RAG 客服壳 · 离线检索问答演示（无外部 LLM）</p>
+      <div class="badges">
+        <span class="badge badge-off">LLM 关闭</span>
+        <span class="badge badge-off">Embedding 关闭</span>
+        <span class="badge badge-on">SQLite FTS5 + BM25</span>
+      </div>
+    </header>
+
+    <section class="demo-card">
+      <div class="demo-toolbar">
+        <label for="domain-select">领域预设：</label>
+        <select id="domain-select">
+          <option value="legal">法律 · 律师事务所</option>
+          <option value="medical">医疗 · 诊所</option>
+          <option value="procurement">招采 · 中标公告</option>
+          <option value="general">通用</option>
+        </select>
+        <span id="greeting" class="dim"></span>
+      </div>
+
+      <div id="chat" class="chat"></div>
+
+      <form id="ask-form" class="ask-bar">
+        <input id="ask-input" type="text" placeholder="请输入您的问题，例如：律师咨询费怎么收取？" autocomplete="off" />
+        <button type="submit">发送</button>
+      </form>
+      <div id="examples" class="examples dim"></div>
+    </section>
+
+    <footer class="demo-footer dim">
+      <a href="/admin">管理后台</a> · <a href="/api/health">健康检查</a> ·
+      <code>RAG-DESK 数据完全本地存储</code>
+    </footer>
+  </main>
+  <script src="/demo.js"></script>
+</body>
+</html>

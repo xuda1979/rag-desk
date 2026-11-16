@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RAG-Desk · 管理后台</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="admin-page">
+  <main class="admin-shell">
+    <header class="demo-header">
+      <h1>RAG-Desk 管理后台</h1>
+      <p class="subtitle">上传文档 · 查看索引 · 查询日志</p>
+      <p class="dim"><a href="/">返回演示页</a></p>
+    </header>
+
+    <section class="grid">
+      <div class="admin-card">
+        <h2>上传文档</h2>
+        <div class="upload-row">
+          <input type="file" id="file-input" multiple
+                 accept=".md,.markdown,.pdf,.docx,.txt,.csv" />
+          <button id="upload-btn">上传并索引</button>
+        </div>
+        <div id="upload-result" class="dim small"></div>
+      </div>
+
+      <div class="admin-card">
+        <h2>索引状态</h2>
+        <div id="stats" class="stats"></div>
+      </div>
+
+      <div class="admin-card">
+        <h2>已索引文档</h2>
+        <table class="docs-table">
+          <thead>
+            <tr><th>ID</th><th>文件名</th><th>类型</th><th>分块</th><th>大小</th><th>上传时间</th><th colspan="2"></th></tr>
+          </thead>
+          <tbody id="docs-body"></tbody>
+        </table>
+      </div>
+
+      <div class="admin-card" id="chunks-card" hidden>
+        <h2>分块预览 <span id="chunks-doc" class="dim small"></span></h2>
+        <div class="chunks" id="chunks-body"></div>
+      </div>
+
+      <div class="admin-card">
+        <h2>查询日志</h2>
+        <table class="docs-table logs-table">
+          <thead>
+            <tr><th>时间</th><th>查询</th><th>领域</th><th>命中</th><th>置信度</th><th>来源文档</th></tr>
+          </thead>
+          <tbody id="logs-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/admin.js"></script>
+</body>
+</html>

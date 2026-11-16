@@ -1,0 +1,25 @@
+{
+  "name": "rag-desk",
+  "version": "1.0.0",
+  "description": "RAG-Desk: 垂直行业 RAG 客服壳（律所/诊所/中标公告）— offline-first local RAG customer support shell",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "seed": "node --disable-warning=ExperimentalWarning scripts/seed-fixtures.js",
+    "test": "node --disable-warning=ExperimentalWarning --test 'test/*.test.js'"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.22.3",
+    "fflate": "^0.8.3",
+    "multer": "^1.4.4",
+    "pdf-parse": "^2.4.5"
+  },
+  "devDependencies": {
+    "pdfkit": "^0.15.2"
+  }
+}

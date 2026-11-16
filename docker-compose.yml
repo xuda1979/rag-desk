@@ -1,0 +1,30 @@
+services:
+  ragdesk:
+    build: .
+    container_name: ragdesk
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - RAGDESK_DB=/app/data/ragdesk.db
+      # Set a strong secret to protect admin endpoints (x-admin-token header).
+      # For production replace `change-me` before exposing the service.
+      - RAGDESK_ADMIN_TOKEN=change-me
+      # Optional: restrict or allow chat embedding origins.
+      #   *               -> allow any origin (default)
+      #   https://site.com -> allow only that origin
+      # - RAGDESK_ALLOW_ORIGIN=*
+      # Optional: require `Authorization: Bearer <token>` on /api/chat.
+      # - RAGDESK_CHAT_TOKEN=
+    volumes:
+      - ragdesk-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  ragdesk-data:
