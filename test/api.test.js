@@ -55,7 +55,7 @@ function get(url) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     http
-      .get({ host: u.hostname, port: u.port, path: u.pathname, headers: { accept: 'application/json' } }, (res) => {
+      .get({ host: u.hostname, port: u.port, path: u.pathname + u.search, headers: { accept: 'application/json' } }, (res) => {
         let out = '';
         res.on('data', (c) => (out += c));
         res.on('end', () => {
@@ -446,6 +446,24 @@ test('/api/chat tolerates a malformed limit (defaults instead of 500)', async ()
   kb.close();
 });
 
+test('/api/chat honors a valid limit (citations capped by the requested count)', async () => {
+  const { kb, server, port } = await startServer();
+  for (let i = 1; i <= 4; i++) {
+    await kb.ingestBuffer(`d${i}.md`, Buffer.from(`咨询费收取规则第${i}条：按小时计费。`));
+  }
+  const one = await post(`http://localhost:${port}/api/chat`, { query: '咨询费怎么收', limit: 1 });
+  assert.strictEqual(one.status, 200);
+  assert.strictEqual(one.body.citations.length, 1, 'limit 1 must cap citations to one');
+  const two = await post(`http://localhost:${port}/api/chat`, { query: '咨询费怎么收', limit: 2 });
+  assert.strictEqual(two.body.citations.length, 2, 'limit 2 must cap citations to two');
+  const malformed = await post(`http://localhost:${port}/api/chat`, { query: '咨询费怎么收', limit: 'abc' });
+  assert.strictEqual(malformed.body.citations.length, 3, 'malformed limit falls back to the default of 3');
+  const zero = await post(`http://localhost:${port}/api/chat`, { query: '咨询费怎么收', limit: 0 });
+  assert.strictEqual(zero.body.citations.length, 3, 'limit 0 falls back to the default of 3');
+  server.close();
+  kb.close();
+});
+
 test('/api/admin/logs tolerates a malformed limit (defaults instead of 500)', async () => {
   const { kb, server, port } = await startServer();
   const ok = await get(`http://localhost:${port}/api/admin/logs?limit=abc`);
@@ -453,6 +471,20 @@ test('/api/admin/logs tolerates a malformed limit (defaults instead of 500)', as
   assert.ok(Array.isArray(ok.body.logs));
   const negative = await get(`http://localhost:${port}/api/admin/logs?limit=-5`);
   assert.strictEqual(negative.status, 200);
+  server.close();
+  kb.close();
+});
+
+test('/api/admin/logs honors a valid limit (returns the requested row count)', async () => {
+  const { kb, server, port } = await startServer();
+  for (let i = 1; i <= 4; i++) {
+    await post(`http://localhost:${port}/api/chat`, { query: `问题${i}关于咨询费` });
+  }
+  const few = await get(`http://localhost:${port}/api/admin/logs?limit=2`);
+  assert.strictEqual(few.status, 200);
+  assert.strictEqual(few.body.logs.length, 2, 'valid limit trims the logs list');
+  const all = await get(`http://localhost:${port}/api/admin/logs`);
+  assert.strictEqual(all.body.logs.length, 4, 'default returns every logged query');
   server.close();
   kb.close();
 });
