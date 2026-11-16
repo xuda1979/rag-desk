@@ -99,7 +99,7 @@ function buildApp(kb, opts = {}) {
       query: result.query,
       domain: result.domain,
       matched: result.citations.length,
-      topScore: result.confidence,
+      topScore: result.top ? result.confidence : null,
       topDocId: result.top ? result.top.docId : null,
       source: 'api',
     });

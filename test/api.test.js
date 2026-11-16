@@ -683,7 +683,11 @@ test('/api/admin/logs carries the top-doc filename join for answered queries', a
   // unanswered queries log a null top-doc join, which the UI renders as '-'
   await post(`http://localhost:${port}/api/chat`, { query: '完全不存在的关键词' });
   const missed = await get(`http://localhost:${port}/api/admin/logs`);
-  assert.strictEqual(missed.body.logs[0].top_filename, null);
+  const missRow = missed.body.logs[0];
+  assert.strictEqual(missRow.top_filename, null);
+  assert.strictEqual(missRow.top_doc_id, null, 'a miss has no top doc id');
+  assert.strictEqual(missRow.top_score, null, 'a miss must log null top_score so admin.js renders "-" not "0%"');
+  assert.strictEqual(missRow.matched, 0, 'a miss logs zero matched citations');
   server.close();
   kb.close();
 });
