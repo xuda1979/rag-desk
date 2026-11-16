@@ -8,22 +8,57 @@
   const greetingEl = document.getElementById('greeting');
   const examplesEl = document.getElementById('examples');
 
-  const GREETINGS = {
-    legal: '您好，我是律所智能问答助手。您可以询问合同、诉讼流程、收费标准等问题。',
-    medical: '您好，我是诊所在线导诊助手。可以询问挂号、科室、体检等问题。',
-    procurement: '您好，这里是招投标信息助手。可以查询公告要点、投标要求、截止时间。',
-    general: '您好，这是您专属的知识库问答助手。',
+  // In-page fallback so the demo still works if /api/domains is unreachable.
+  const FALLBACK = {
+    legal: {
+      label: '法律 · 律师事务所',
+      greeting: '您好，我是律所智能问答助手。您可以询问合同、诉讼流程、收费标准等问题。',
+      examples: ['律师咨询费怎么收取？', '劳动仲裁的流程是什么？', '合同纠纷可以起诉吗？'],
+    },
+    medical: {
+      label: '医疗 · 诊所',
+      greeting: '您好，我是诊所在线导诊助手。可以询问挂号、科室、体检等问题。',
+      examples: ['挂号需要带什么？', '儿童接种疫苗时间？', '可以刷医保卡吗？'],
+    },
+    procurement: {
+      label: '招采 · 中标公告',
+      greeting: '您好，这里是招投标信息助手。可以查询公告要点、投标要求、截止时间。',
+      examples: ['这个项目什么时候截止投标？', '中标人是谁？', '项目预算金额是多少？'],
+    },
+    general: {
+      label: '通用',
+      greeting: '您好，这是您专属的知识库问答助手。',
+      examples: [],
+    },
   };
-  const EXAMPLES = {
-    legal: ['律师咨询费怎么收取？', '劳动仲裁的流程是什么？', '合同纠纷可以起诉吗？'],
-    medical: ['挂号需要带什么？', '儿童接种疫苗时间？', '可以刷医保卡吗？'],
-    procurement: ['这个项目什么时候截止投标？', '中标人是谁？', '项目预算金额是多少？'],
-    general: ['介绍一下你们的知识库'],
-  };
+
+  // Populated from /api/domains so custom domains added to src/lib/domains.js
+  // appear automatically (user manual 4.2); falls back to FALLBACK when the
+  // endpoint is unreachable.
+  let domains = FALLBACK;
+
+  function fillSelect(list) {
+    const prev = domainSelect.value;
+    domainSelect.innerHTML = '';
+    for (const d of list) {
+      const opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = d.label;
+      domainSelect.appendChild(opt);
+    }
+    domainSelect.value = domains[prev] ? prev : (list[0] || {}).id;
+  }
+
+  function renderFor(active) {
+    const d = domains[active] || {};
+    greetingEl.textContent = d.greeting || '';
+    renderExamples();
+  }
 
   function renderExamples() {
     examplesEl.innerHTML = '';
-    (EXAMPLES[domainSelect.value] || []).forEach((q) => {
+    const d = domains[domainSelect.value] || {};
+    for (const q of d.examples || []) {
       const b = document.createElement('button');
       b.textContent = q;
       b.addEventListener('click', () => {
@@ -31,7 +66,7 @@
         form.requestSubmit();
       });
       examplesEl.appendChild(b);
-    });
+    }
   }
 
   function addMsg(role, html) {
@@ -84,10 +119,21 @@
     chatEl.scrollTop = chatEl.scrollHeight;
   });
 
-  domainSelect.addEventListener('change', () => {
-    greetingEl.textContent = GREETINGS[domainSelect.value] || '';
-    renderExamples();
-  });
-  renderExamples();
-  greetingEl.textContent = GREETINGS[domainSelect.value];
+  domainSelect.addEventListener('change', () => renderFor(domainSelect.value));
+  renderFor(domainSelect.value);
+
+  // Auto-sync the domain list and presets from the server.
+  fetch('/api/domains')
+    .then((r) => r.json())
+    .then((data) => {
+      if (!Array.isArray(data.domains) || !data.domains.length) return;
+      const map = {};
+      for (const d of data.domains) {
+        map[d.id] = { greeting: d.greeting, examples: d.examples || [] };
+      }
+      domains = map;
+      fillSelect(data.domains);
+      renderFor(domainSelect.value);
+    })
+    .catch(() => {});
 })();
