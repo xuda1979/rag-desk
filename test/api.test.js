@@ -301,3 +301,35 @@ test('static pages served', async () => {
   server.close();
   kb.close();
 });
+
+test('/api/domains returns preset domains with labels and example questions', async () => {
+  const { kb, server, port } = await startServer();
+  const res = await get(`http://localhost:${port}/api/domains`);
+  assert.strictEqual(res.status, 200);
+  const ids = res.body.domains.map((d) => d.id);
+  assert.ok(ids.includes('legal'));
+  assert.ok(ids.includes('medical'));
+  assert.ok(ids.includes('procurement'));
+  assert.ok(ids.includes('general'));
+  const legal = res.body.domains.find((d) => d.id === 'legal');
+  assert.match(legal.label, /法律/);
+  assert.ok(Array.isArray(legal.examples) && legal.examples.length > 0);
+  assert.ok(res.body.domains.every((d) => d.greeting));
+  server.close();
+  kb.close();
+});
+
+test('/api/admin/stats reports total and matched query counts', async () => {
+  const { kb, server, port } = await startServer();
+  const before = await get(`http://localhost:${port}/api/admin/stats`);
+  assert.strictEqual(before.status, 200);
+  assert.strictEqual(before.body.stats.total, 0);
+
+  await kb.ingestBuffer('q.md', Buffer.from('本诊所工作日 8:00 开门。'));
+  await post(`http://localhost:${port}/api/chat`, { query: '诊所以什么时间开门' });
+  const after = await get(`http://localhost:${port}/api/admin/stats`);
+  assert.strictEqual(after.body.stats.total, 1);
+  assert.strictEqual(after.body.stats.with_answer, 1);
+  server.close();
+  kb.close();
+});
