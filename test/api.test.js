@@ -1946,3 +1946,63 @@ test('admin docs list carries the exact file kind per format the table renders',
     kb.close();
   }
 });
+
+test('upload mime persists into the docs row via the wire (multipart Content-Type carried through)', async () => {
+  const { kb, server, port } = await startServer();
+  try {
+    // app.js feeds every uploaded file's multer mimetype into ingestBuffer's
+    // meta.mime; a refactor that stopped forwarding it would leave the admin
+    // list's mime column empty on real uploads while the unit-level mime test
+    // still passes. Lock the end-to-end path: what the browser sends as the
+    // part's Content-Type must be what appears on the /api/admin/docs row.
+    const boundary = '----rd-mime';
+    const parts = [
+      ['notice-provider.txt', 'text/plain'],
+      ['faq-transfer.csv', 'text/csv'],
+      ['vaccine.md', 'text/markdown'],
+    ].map(([name, mime]) => {
+      const buf = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'corpus', name));
+      return Buffer.concat([
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="${name}"\r\nContent-Type: ${mime}\r\n\r\n`
+        ),
+        buf,
+        Buffer.from('\r\n'),
+      ]);
+    });
+    const body = Buffer.concat([...parts, Buffer.from(`--${boundary}--\r\n`)]);
+    const res = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/admin/upload',
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+        }
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.results.length, 3);
+    for (const r of res.body.results) assert.strictEqual(r.action, 'indexed');
+
+    const docs = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(docs.body.docs.length, 3);
+    const byName = new Map(docs.body.docs.map((d) => [d.filename, d.mime]));
+    assert.strictEqual(byName.get('notice-provider.txt'), 'text/plain', 'txt part mime must survive to the row');
+    assert.strictEqual(byName.get('faq-transfer.csv'), 'text/csv', 'csv part mime must survive to the row');
+    assert.strictEqual(byName.get('vaccine.md'), 'text/markdown', 'md part mime must survive to the row');
+    assert.ok(docs.body.docs.every((d) => typeof d.mime === 'string'), 'uploaded rows must carry a real mime, not null');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
