@@ -153,6 +153,37 @@ test('answer on empty corpus gives graceful fallback', () => {
   kb.close();
 });
 
+test('isSupportedFile / fileKindOf classify the five accepted formats, reject the rest', () => {
+  const kb = new KnowledgeBase(tempDb());
+  for (const f of ['a.md', 'a.MARKDOWN', 'b.txt', 'c.csv', 'd.pdf', 'e.docx']) {
+    assert.strictEqual(kb.isSupportedFile(f), true, `${f} should be supported`);
+    assert.ok(kb.fileKindOf(f), `${f} should carry a kind`);
+  }
+  assert.deepStrictEqual(
+    ['a.md', 'a.MARKDOWN', 'b.txt', 'c.csv', 'd.pdf', 'e.docx'].map((f) => kb.fileKindOf(f)),
+    ['markdown', 'markdown', 'text', 'csv', 'pdf', 'docx'],
+    'extensions map to the five documented kinds, case-insensitively'
+  );
+  for (const f of ['f.xyz', 'noext', 'g.html', 'h.exe']) {
+    assert.strictEqual(kb.isSupportedFile(f), false, `${f} should be rejected`);
+    assert.strictEqual(kb.fileKindOf(f), null, `${f} should have no kind`);
+  }
+  kb.close();
+});
+
+test('ingestBuffer stores the mime from upload metadata and rejects unknown kinds before touching storage', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  const r = await kb.ingestBuffer('m.mp4', Buffer.from('whatever'), { mime: 'video/mp4' });
+  assert.strictEqual(r.action, 'error');
+  assert.match(r.error, /不支持的文件类型/);
+  assert.strictEqual(kb.getAllDocs().length, 0, 'rejected file never reaches storage');
+
+  await kb.ingestBuffer('m.txt', Buffer.from('挂号请带身份证。'), { mime: 'text/plain' });
+  const doc = kb.getAllDocs()[0];
+  assert.strictEqual(doc.mime, 'text/plain', 'upload mime is persisted on the doc row');
+  kb.close();
+});
+
 test('logQuery + getQueryLogs roundtrip (AC6)', () => {
   const kb = new KnowledgeBase(tempDb());
   kb.logQuery({ query: '测试问题', domain: 'legal', matched: 3, topScore: 0.6, topDocId: 1, source: 'api' });
