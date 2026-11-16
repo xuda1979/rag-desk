@@ -16,7 +16,7 @@ CJK 友好分词 + BM25 做检索回答，数据不出机器。
 ## 技术栈
 - Node.js ≥ 22.5（使用内置 `node:sqlite`，无需编译本地依赖）
 - 解析器：`pdf-parse`（PDF）、`fflate`（DOCX 解压）、自研 CSV/纯文本
-- 前端：原生 HTML/CSS/JS（chat UI + admin + wiki 组件），无构建步骤
+- 前端：原生 HTML/CSS/JS（演示问答页 + 管理后台 + 嵌入浮窗），无构建步骤
 - 部署：Docker Compose
 
 ## 快速开始
@@ -69,7 +69,8 @@ docker compose up --build
 | GET | /api/admin/docs/:id | 某文档的全部分块（查看索引） |
 | DELETE | /api/admin/docs/:id | 删除文档及其分块 |
 | POST | /api/admin/upload | multipart 上传（字段名 `files`，支持多文件，单文件 ≤ 50MB，单次 ≤ 20 个） |
-| GET | /api/admin/logs | 查询日志 + 统计（上传后可查看到记录） |
+| GET | /api/admin/logs | 查询日志（含统计摘要） |
+| GET | /api/admin/stats | 查询量统计（总查询 / 有回答命中 / 命中率） |
 | GET | /widget.js | 嵌入式聊天浮窗脚本 |
 
 ## 环境变量
