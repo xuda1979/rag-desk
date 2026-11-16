@@ -283,6 +283,29 @@ test('DELETE of a missing document returns 404', async () => {
   kb.close();
 });
 
+test('/api/chat tolerates a malformed limit (defaults instead of 500)', async () => {
+  const { kb, server, port } = await startServer();
+  const ok = await post(`http://localhost:${port}/api/chat`, { query: 'xyz', limit: 'abc' });
+  assert.strictEqual(ok.status, 200, 'malformed limit must not crash the endpoint');
+  const negative = await post(`http://localhost:${port}/api/chat`, { query: 'xyz', limit: -5 });
+  assert.strictEqual(negative.status, 200);
+  const huge = await post(`http://localhost:${port}/api/chat`, { query: 'xyz', limit: 1e9 });
+  assert.strictEqual(huge.status, 200);
+  server.close();
+  kb.close();
+});
+
+test('/api/admin/logs tolerates a malformed limit (defaults instead of 500)', async () => {
+  const { kb, server, port } = await startServer();
+  const ok = await get(`http://localhost:${port}/api/admin/logs?limit=abc`);
+  assert.strictEqual(ok.status, 200, 'malformed limit must not crash the endpoint');
+  assert.ok(Array.isArray(ok.body.logs));
+  const negative = await get(`http://localhost:${port}/api/admin/logs?limit=-5`);
+  assert.strictEqual(negative.status, 200);
+  server.close();
+  kb.close();
+});
+
 test('widget script is served and self-contained', async () => {
   const { kb, server, port } = await startServer();
   const res = await get(`http://localhost:${port}/widget.js`);

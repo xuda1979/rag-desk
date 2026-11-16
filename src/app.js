@@ -8,6 +8,19 @@ const { getDomain, domainIds } = require('./lib/domains');
 const ROOT = path.join(__dirname, '..');
 
 /**
+ * Coerce a user-supplied limit into a sane integer. Malformed values (e.g.
+ * "abc") would otherwise pass NaN into SQLite LIMIT ? and blow up with a
+ * "datatype mismatch" 500; negative/zero/huge values are clamped too.
+ * @param {*} v raw value from query/body
+ * @param {number} dflt fallback when v is not a positive finite number
+ * @returns {number}
+ */
+function safeLimit(v, dflt) {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 1000) : dflt;
+}
+
+/**
  * Build the express app backed by the given KnowledgeBase.
  * A factory so tests can spin up isolated instances.
  *
@@ -81,7 +94,7 @@ function buildApp(kb, opts = {}) {
     if (!query || !String(query).trim()) {
       return res.status(400).json({ error: 'query is required' });
     }
-    const result = kb.answer(String(query).trim(), { domain, limit });
+    const result = kb.answer(String(query).trim(), { domain, limit: safeLimit(limit, 3) });
     kb.logQuery({
       query: result.query,
       domain: result.domain,
@@ -127,7 +140,7 @@ function buildApp(kb, opts = {}) {
   });
 
   app.get('/api/admin/logs', (req, res) => {
-    const limit = Number(req.query.limit || 100);
+    const limit = safeLimit(req.query.limit, 100);
     res.json({ logs: kb.getQueryLogs(limit), stats: kb.getQueryStats() });
   });
 
