@@ -1564,6 +1564,33 @@ test('/api/chat body is exactly the engine answer contract: full-payload lock', 
   }
 });
 
+test('/api/admin/stats body is exactly { stats: { total, with_answer } } — full-payload lock', async () => {
+  const { kb, server, port } = await startServer();
+  // admin.js renders 总查询数/命中数/命中率 straight from stats.total and
+  // stats.with_answer; the per-field tests above pin values but not the key
+  // set. Lock the whole payload so a storage/route refactor cannot add, drop
+  // or rename a stat key the panel depends on.
+  try {
+    const empty = await get(`http://localhost:${port}/api/admin/stats`);
+    assert.strictEqual(empty.status, 200);
+    assert.deepStrictEqual(empty.body, { stats: { total: 0, with_answer: 0 } }, 'empty DB: exactly two integer keys');
+
+    await kb.ingestBuffer('q.md', Buffer.from('本诊所工作日 8:00 开门。'));
+    await post(`http://localhost:${port}/api/chat`, { query: '诊所以什么时间开门' }); // hit
+    await post(`http://localhost:${port}/api/chat`, { query: 'qqq zzz xxx' }); // miss
+
+    const after = await get(`http://localhost:${port}/api/admin/stats`);
+    assert.strictEqual(after.status, 200);
+    assert.deepStrictEqual(after.body, { stats: { total: 2, with_answer: 1 } }, 'hit counts, miss counts only toward total');
+    assert.deepStrictEqual(Object.keys(after.body.stats).sort(), ['total', 'with_answer'], 'stats has exactly these two keys');
+    assert.strictEqual(typeof after.body.stats.total, 'number');
+    assert.strictEqual(typeof after.body.stats.with_answer, 'number');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/admin/docs rows carry sha256, status and mime; detail chunks expose exactly id/chunk_idx/body', async () => {
   const { kb, server, port } = await startServer();
   // listDocs returns d.* + chunk_count (a computed alias, not a column), so the
