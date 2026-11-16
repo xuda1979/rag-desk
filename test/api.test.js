@@ -131,6 +131,35 @@ test('server-side: unknown domain falls back to general preset', async () => {
   kb.close();
 });
 
+test('server-side: a valid domain selection is honored in the answer phrasing on the wire', async () => {
+  const { kb, server, port } = await startServer();
+  // demo.js always sends domainSelect.value (default 'general') with every
+  // chat request; the server must phrase the answer per the SELECTED preset
+  // and echo the id back, not silently force the general preset.
+  try {
+    await kb.ingestBuffer('legal.md', Buffer.from('律师咨询费按每小时 300 元收取，首次咨询免费。'));
+    const selected = await post(`http://localhost:${port}/api/chat`, { query: '咨询费怎么收', domain: 'legal' });
+    assert.strictEqual(selected.status, 200);
+    assert.ok(selected.body.citations.length > 0, 'query must hit the ingested doc');
+    assert.strictEqual(selected.body.domain, 'legal', 'selected domain must be echoed on the wire');
+    assert.ok(
+      selected.body.answer.startsWith('根据律所知识库'),
+      'answer should open with the legal preset lead'
+    );
+
+    const general = await post(`http://localhost:${port}/api/chat`, { query: '咨询费怎么收', domain: 'general' });
+    assert.strictEqual(general.status, 200);
+    assert.strictEqual(general.body.domain, 'general');
+    assert.ok(
+      general.body.answer.startsWith('以下是知识库中'),
+      'general preset must use its own lead, distinct from legal'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('server-side: /api/health reports offline engine', async () => {
   const { kb, server, port } = await startServer();
   const res = await get(`http://localhost:${port}/api/health`);
