@@ -116,9 +116,4 @@ function fileKind(filename) {
   }
 }
 
-/** True when the file shows a supported extension. */
-function isSupportedFile(filename) {
-  return fileKind(filename) !== null;
-}
-
-module.exports = { parseCsv, extractDocx, extractPdf, textFromBuffer, fileKind, isSupportedFile };
+module.exports = { parseCsv, extractDocx, extractPdf, textFromBuffer, fileKind };
