@@ -237,6 +237,34 @@ test('UTF-8 BOM in md/txt files is stripped during chunking (Windows/Excel expor
   kb.close();
 });
 
+test('ingestFile reads a path, stores basename, dedupes and rejects unsupported extensions', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ragdesk-file-'));
+  const nested = path.join(dir, 'sub', 'note.md');
+  fs.mkdirSync(path.join(dir, 'sub'));
+  fs.writeFileSync(nested, '咨询费按小时计费，合同纠纷在被告住所地人民法院起诉。');
+
+  const first = await kb.ingestFile(nested);
+  assert.strictEqual(first.action, 'indexed');
+  assert.strictEqual(first.chunks, 1);
+  assert.strictEqual(kb.getAllDocs()[0].filename, 'note.md', 'basename is stored, not the nested path');
+
+  const dup = await kb.ingestFile(nested, { mime: 'text/markdown' });
+  assert.strictEqual(dup.action, 'duplicate', 'same file on disk re-ingests as duplicate');
+  assert.strictEqual(dup.docId, first.docId, 'duplicate points at the existing doc');
+  assert.strictEqual(kb.getAllDocs().length, 1, 'no second doc row created');
+
+  const bad = path.join(dir, 'junk.dat');
+  fs.writeFileSync(bad, 'not readable');
+  const err = await kb.ingestFile(bad);
+  assert.strictEqual(err.action, 'error');
+  assert.match(err.error, /不支持的文件类型/);
+  assert.strictEqual(kb.getAllDocs().length, 1);
+
+  await assert.rejects(() => kb.ingestFile(path.join(dir, 'missing.md')), /ENOENT/, 'missing path propagates fs error');
+  kb.close();
+});
+
 test('ingestDir returns per-file results; misses report errors, indexable files store', async () => {
   const kb = new KnowledgeBase(tempDb());
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ragdesk-ingest-'));
