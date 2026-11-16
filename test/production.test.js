@@ -6,6 +6,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const http = require('node:http');
+const net = require('node:net');
+const { spawn } = require('node:child_process');
 
 const { KnowledgeBase } = require('../src/lib/knowledge');
 const { buildApp } = require('../src/app');
@@ -226,5 +228,83 @@ test('prod: 50MB upload limit enforced (LIMIT_FILE_SIZE -> 413 JSON)', async () 
   } finally {
     server.close();
     kb.close();
+  }
+});
+
+test('prod: server.js boot seeds a fresh DB, gates admin, and answers chat', async () => {
+  const bootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rd-boot-'));
+  const dbPath = path.join(bootDir, 'boot.db');
+  const port = await new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.on('error', reject);
+    probe.listen(0, () => {
+      const p = probe.address().port;
+      probe.close(() => resolve(p));
+    });
+  });
+
+  let child = null;
+  const runBoot = () =>
+    new Promise((resolve, reject) => {
+      child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/server.js'], {
+        cwd: path.join(__dirname, '..'),
+        env: {
+          ...process.env,
+          RAGDESK_DB: dbPath,
+          PORT: String(port),
+          RAGDESK_ADMIN_TOKEN: 'boot-tok',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let out = '';
+      child.stdout.on('data', (c) => (out += c));
+      child.stderr.on('data', (c) => (out += c));
+      child.on('error', reject);
+      child.on('exit', (code, signal) => resolve({ code, signal, out }));
+    });
+
+  try {
+    const boot = runBoot();
+    void boot;
+    let health;
+    let attempts = 0;
+    while (attempts < 40) {
+      try {
+        health = await fetch(`http://127.0.0.1:${port}/api/health`);
+        if (health.ok) break;
+      } catch (_) {
+        /* not up yet */
+      }
+      attempts += 1;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(health && health.ok, 'booted server should answer /api/health');
+    const healthBody = await health.json();
+    assert.strictEqual(healthBody.ok, true);
+    assert.strictEqual(healthBody.mode, 'offline');
+
+    // fresh DB -> fixture corpus auto-seeded -> admin can list 10+ docs
+    const docsRes = await fetch(`http://127.0.0.1:${port}/api/admin/docs`, {
+      headers: { 'x-admin-token': 'boot-tok' },
+    });
+    assert.strictEqual(docsRes.status, 200);
+    const docsBody = await docsRes.json();
+    assert.ok(docsBody.docs.length >= 10, `boot should seed the corpus, got ${docsBody.docs.length} docs`);
+
+    // admin token gate is live
+    const deny = await fetch(`http://127.0.0.1:${port}/api/admin/docs`);
+    assert.strictEqual(deny.status, 401);
+
+    // chat answers against the seeded corpus
+    const chat = await fetch(`http://127.0.0.1:${port}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: '常年法律顾问' }),
+    });
+    assert.strictEqual(chat.status, 200);
+    const chatBody = await chat.json();
+    assert.ok(chatBody.answer.length > 0, 'booted server should answer queries');
+  } finally {
+    if (child && child.exitCode === null) child.kill('SIGTERM');
   }
 });
