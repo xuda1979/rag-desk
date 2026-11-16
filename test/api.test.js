@@ -749,3 +749,55 @@ test('/api/admin/stats reports total and matched query counts', async () => {
   server.close();
   kb.close();
 });
+
+test('CORS headers ride on actual responses, not just preflight', async () => {
+  const { kb, server, port } = await startServer();
+  // Cross-origin widgets depend on the real GET/POST responses carrying CORS
+  // headers so the browser lets the page read the body; preflight alone is not
+  // enough. The default (no RAGDESK_ALLOW_ORIGIN) reflects the request origin.
+  const withOrigin = (method, reqPath, headers = {}) =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        { host: 'localhost', port, path: reqPath, method, headers: { Origin: 'https://page.example', ...headers } },
+        (r) => {
+          r.resume();
+          r.on('end', () =>
+            resolve({
+              status: r.statusCode,
+              allowOrigin: r.headers['access-control-allow-origin'],
+              allowMethods: r.headers['access-control-allow-methods'],
+              allowHeaders: r.headers['access-control-allow-headers'],
+            })
+          );
+        }
+      );
+      req.on('error', reject);
+      req.end();
+    });
+
+  const health = await withOrigin('GET', '/api/health');
+  assert.strictEqual(health.status, 200);
+  assert.strictEqual(health.allowOrigin, 'https://page.example', 'GET response must reflect the origin');
+  assert.strictEqual(health.allowMethods, 'GET,POST,DELETE,OPTIONS');
+  assert.strictEqual(health.allowHeaders, 'Content-Type, x-admin-token, Authorization');
+
+  const chat = await withOrigin('POST', '/api/chat', {
+    'Content-Type': 'application/json',
+    'Content-Length': '0',
+  });
+  assert.strictEqual(chat.status, 400, 'empty body 400 still carries CORS headers');
+  assert.strictEqual(chat.allowOrigin, 'https://page.example', 'error responses must stay cross-origin readable');
+
+  // requests WITHOUT an Origin stay CORS-free (same-origin traffic, no leak)
+  const sameOrigin = await new Promise((resolve, reject) => {
+    http
+      .get({ host: 'localhost', port, path: '/api/health' }, (r) => {
+        r.resume();
+        r.on('end', () => resolve(r.headers['access-control-allow-origin']));
+      })
+      .on('error', reject);
+  });
+  assert.strictEqual(sameOrigin, undefined, 'no Origin header => no CORS headers');
+  server.close();
+  kb.close();
+});
