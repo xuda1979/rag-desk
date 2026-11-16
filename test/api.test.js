@@ -970,7 +970,12 @@ test('widget script wiring: defaults, domain passthrough and chat body shape', a
     // data-token -> '') rather than break the embed.
     assert.match(res.body, /script\.getAttribute\('data-api'\) \|\| '\/api\/chat'/);
     assert.match(res.body, /script\.getAttribute\('data-domain'\) \|\| 'general'/);
+    assert.match(res.body, /script\.getAttribute\('data-title'\) \|\| '知识库助手'/);
+    assert.match(res.body, /script\.getAttribute\('data-greeting'\) \|\| '您好，我是您的知识库助手，请问有什么可以帮您？'/);
     assert.match(res.body, /script\.getAttribute\('data-token'\) \|\| ''/);
+    // the title/greeting fallbacks feed the rendered chrome and the opening bot bubble
+    assert.ok(res.body.includes("'<div id=\"ragdesk-head\">' + esc(TITLE) +"), 'title fallback must render into the panel head');
+    assert.ok(res.body.includes("addMsg('bot', esc(GREETING));"), 'greeting fallback must seed the opening bot bubble');
     // the selected domain is forwarded with every question so doc presets apply;
     // body shape must match what /api/chat validates server-side.
     assert.match(res.body, /JSON\.stringify\(\{ query: q, domain: DOMAIN \}\)/);
