@@ -6,7 +6,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { parseCsv, textFromBuffer, fileKind, extractPdf } = require('../src/lib/extractors');
+const { parseCsv, textFromBuffer, fileKind, extractPdf, extractDocx } = require('../src/lib/extractors');
 
 test('parseCsv: handles escaped quotes per RFC-4180', () => {
   assert.deepStrictEqual(parseCsv('a,"b""c",d\n'), [['a', 'b"c', 'd']]);
@@ -70,4 +70,14 @@ test('extractPdf extracts CJK text from the committed PDF fixture', async () => 
   assert.match(text, /预约方式/);
   // glyph-hole runs and page markers are scrubbed, not left as raw control chars
   assert.doesNotMatch(text, /[\u0000\uFFFD]/);
+});
+
+test('extractDocx fails loudly on corrupt or docx-less input', () => {
+  const { zipSync, strToU8 } = require('fflate');
+  // a valid zip that is missing word/document.xml
+  const noDoc = zipSync({ 'word/_rels/document.xml.rels': strToU8('x') });
+  assert.throws(() => extractDocx(new Uint8Array(noDoc)), /missing word\/document.xml/);
+  // not a zip at all / empty buffer -> fflate rejects
+  assert.throws(() => extractDocx(Buffer.from('not a zip at all')), /invalid zip/);
+  assert.throws(() => extractDocx(Buffer.alloc(0)), /invalid zip/);
 });
