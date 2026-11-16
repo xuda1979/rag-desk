@@ -106,7 +106,9 @@ function buildApp(kb, opts = {}) {
   });
 
   app.delete('/api/admin/docs/:id', (req, res) => {
-    kb.deleteDoc(Number(req.params.id));
+    const doc = kb.getDoc(Number(req.params.id));
+    if (!doc) return res.status(404).json({ error: 'not found' });
+    kb.deleteDoc(doc.id);
     res.json({ ok: true });
   });
 
@@ -160,15 +162,18 @@ function buildApp(kb, opts = {}) {
     const status =
       err && err.status ? err.status :
       err && err.code === 'LIMIT_FILE_SIZE' ? 413 :
+      err && err.code === 'LIMIT_UNEXPECTED_FILE' ? 400 :
       err && err.type === 'entity.too.large' ? 413 : 500;
     const message =
       err && err.code === 'LIMIT_FILE_SIZE'
         ? 'file too large (max 50MB)'
-        : err && err.type === 'entity.too.large'
-          ? 'request body too large'
-          : err && err.message
-            ? err.message
-            : 'internal server error';
+        : err && err.code === 'LIMIT_UNEXPECTED_FILE'
+          ? 'too many files (max 20 per upload)'
+          : err && err.type === 'entity.too.large'
+            ? 'request body too large'
+            : err && err.message
+              ? err.message
+              : 'internal server error';
     if (status >= 500) console.error('[api]', err);
     res.status(status).json({ error: message });
   });

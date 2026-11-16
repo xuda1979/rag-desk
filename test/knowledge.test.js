@@ -83,6 +83,16 @@ test('ingest then delete keeps index clean', async () => {
   kb.close();
 });
 
+test('empty / whitespace-only file is rejected, not indexed', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  const r1 = await kb.ingestBuffer('empty.md', Buffer.from(''));
+  const r2 = await kb.ingestBuffer('blank.md', Buffer.from('   \n\n  '));
+  assert.strictEqual(r1.action, 'error');
+  assert.strictEqual(r2.action, 'error');
+  assert.strictEqual(kb.getAllDocs().length, 0, 'no orphan doc row should be created');
+  kb.close();
+});
+
 test('offline mode returns answer without any LLM/embedding (AC3)', () => {
   const kb = new KnowledgeBase(tempDb());
   const ans = kb.answer('法学');

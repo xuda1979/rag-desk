@@ -167,6 +167,111 @@ test('admin chunk listing: /api/admin/docs/:id returns chunks (view index)', asy
   kb.close();
 });
 
+test('admin upload endpoint rejects an empty file (no 0-chunk docs)', async () => {
+  const { kb, server, port } = await startServer();
+  const boundary = '----rd-empty';
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="empty.md"\r\nContent-Type: text/markdown\r\n\r\n`
+    ),
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  const res = await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: 'localhost',
+        port,
+        path: '/api/admin/upload',
+        method: 'POST',
+        headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      },
+      (r) => {
+        let out = '';
+        r.on('data', (c) => (out += c));
+        r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.results[0].action, 'error');
+  // nothing was persisted
+  const docs = await get(`http://localhost:${port}/api/admin/docs`);
+  assert.strictEqual(docs.body.docs.length, 0);
+  server.close();
+  kb.close();
+});
+
+test('admin upload endpoint rejects more than 20 files with a 400', async () => {
+  const { kb, server, port } = await startServer();
+  const boundary = '----rd-many';
+  const chunks = [];
+  for (let i = 0; i < 21; i++) {
+    chunks.push(
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="f${i}.txt"\r\nContent-Type: text/plain\r\n\r\nhello ${i}\r\n`
+    );
+  }
+  chunks.push(`--${boundary}--\r\n`);
+  const body = Buffer.from(chunks.join(''));
+  const res = await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: 'localhost',
+        port,
+        path: '/api/admin/upload',
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length,
+        },
+      },
+      (r) => {
+        let out = '';
+        r.on('data', (c) => (out += c));
+        r.on('end', () => {
+          let parsed = out;
+          try {
+            parsed = JSON.parse(out);
+          } catch (_) {}
+          resolve({ status: r.statusCode, body: parsed });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /max 20/);
+  server.close();
+  kb.close();
+});
+
+test('DELETE of a missing document returns 404', async () => {
+  const { kb, server, port } = await startServer();
+  const res = await new Promise((resolve, reject) => {
+    http
+      .request({ host: 'localhost', port, path: '/api/admin/docs/99999', method: 'DELETE' }, (r) => {
+        let out = '';
+        r.on('data', (c) => (out += c));
+        r.on('end', () => {
+          try {
+            resolve({ status: r.statusCode, body: JSON.parse(out) });
+          } catch (_) {
+            resolve({ status: r.statusCode, body: out });
+          }
+        });
+      })
+      .on('error', reject)
+      .end();
+  });
+  assert.strictEqual(res.status, 404);
+  server.close();
+  kb.close();
+});
+
 test('widget script is served and self-contained', async () => {
   const { kb, server, port } = await startServer();
   const res = await get(`http://localhost:${port}/widget.js`);

@@ -73,6 +73,10 @@ class KnowledgeBase {
     }
     try {
       const text = await this._extractText(filename, buffer);
+      const chunks = chunkText(text, { window: 400, overlap: 40 });
+      if (chunks.length === 0) {
+        return { action: 'error', error: `文件内容为空，无法索引: ${filename}` };
+      }
       const kind = this.fileKindOf(filename);
       const docId = this.storage.insertDoc({
         filename: path.basename(filename),
@@ -81,7 +85,6 @@ class KnowledgeBase {
         size: buffer.length,
         sha256: sha,
       });
-      const chunks = chunkText(text, { window: 400, overlap: 40 });
       this.storage.insertChunks(docId, chunks);
       return { action: 'indexed', docId, chunks: chunks.length };
     } catch (e) {
