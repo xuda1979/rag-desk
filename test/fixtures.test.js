@@ -7,6 +7,7 @@ const fs = require('node:fs');
 
 const { KnowledgeBase } = require('../src/lib/knowledge');
 const { ensureCorpusFiles } = require('../scripts/seed-fixtures');
+const { buildPdfFixture } = require('../scripts/make-pdf-fixture');
 const { extractDocx, parseCsv } = require('../src/lib/extractors');
 
 const CORPUS = path.join(__dirname, '..', 'fixtures', 'corpus');
@@ -17,9 +18,14 @@ test('fixture corpus contains all required formats', async () => {
   for (const f of ['law-faq.md', 'clinic-faq.md', 'bid-announcement.md', 'faq-transfer.csv', 'notice-provider.txt']) {
     assert.ok(names.includes(f), `missing fixture ${f}`);
   }
-  // PDF/DOCX are generated; not strictly required but should exist when fonts are available
-  assert.ok(fs.existsSync(path.join(CORPUS, 'clinic-guide.pdf')), 'PDF fixture should exist (Droid TTF present)');
+  // PDF/DOCX are generated; DOCX is required, PDF generation is best-effort
+  // (skipped when pdfkit or a CJK-capable TTF font is unavailable), so the PDF
+  // is only asserted when the generator actually ran.
   assert.ok(fs.existsSync(path.join(CORPUS, 'law-services.docx')), 'DOCX fixture should exist');
+  const pdfGenerated = await buildPdfFixture();
+  if (pdfGenerated) {
+    assert.ok(fs.existsSync(path.join(CORPUS, 'clinic-guide.pdf')), 'PDF fixture should exist (Droid TTF present)');
+  }
 });
 
 function freshKb() {
