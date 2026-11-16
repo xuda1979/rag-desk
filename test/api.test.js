@@ -133,6 +133,32 @@ test('server-side: /api/chat rejects whitespace-only queries and trims padded on
   }
 });
 
+test('server-side: /api/chat coerces non-string queries and 400s falsy ones', async () => {
+  const { kb, server, port } = await startServer();
+  // JSON clients may send numbers/bools for query; the guard tests the raw
+  // value's truthiness (falsy -> the exact blank 400) while truthy values are
+  // answered and echoed in string form.
+  try {
+    const num = await post(`http://localhost:${port}/api/chat`, { query: 123 });
+    assert.strictEqual(num.status, 200);
+    assert.strictEqual(num.body.query, '123', 'numeric query must be answered and echoed as its string form');
+
+    const bool = await post(`http://localhost:${port}/api/chat`, { query: true });
+    assert.strictEqual(bool.status, 200);
+    assert.strictEqual(bool.body.query, 'true', 'boolean query must be answered and echoed as its string form');
+
+    // falsy non-string values share the exact blank-query 400 (guard is !query)
+    for (const payload of [{ query: 0 }, { query: false }, { query: null }]) {
+      const res = await post(`http://localhost:${port}/api/chat`, payload);
+      assert.strictEqual(res.status, 400, `payload ${JSON.stringify(payload)} must 400`);
+      assert.deepStrictEqual(res.body, { error: 'query is required' });
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('server-side: unknown domain falls back to general preset', async () => {
   const { kb, server, port } = await startServer();
   const unknown = await post(`http://localhost:${port}/api/chat`, { query: 'xyz', domain: 'slackbot' });
