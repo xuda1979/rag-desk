@@ -95,6 +95,31 @@ test('server-side: /api/chat 400 on empty query', async () => {
   kb.close();
 });
 
+test('server-side: /api/chat rejects whitespace-only queries and trims padded ones', async () => {
+  const { kb, server, port } = await startServer();
+  try {
+    // app.js guards with !String(query).trim(); a whitespace-only string must
+    // surface the same stable JSON 400 as a missing query, not an empty hit.
+    const blank = await post(`http://localhost:${port}/api/chat`, { query: '   ' });
+    assert.strictEqual(blank.status, 400);
+    assert.strictEqual(blank.body.error, 'query is required');
+
+    // a padded query is trimmed before answering and logged trimmed, so the
+    // demo UI's submitted value round-trips cleanly and logs stay comparable.
+    await kb.ingestBuffer('q.md', Buffer.from('本诊所工作日 8:00 开门，周六日 9:00 开门。'));
+    const padded = await post(`http://localhost:${port}/api/chat`, { query: '  诊所以什么时间开门  ' });
+    assert.strictEqual(padded.status, 200);
+    assert.strictEqual(padded.body.query, '诊所以什么时间开门', 'response echoes the trimmed query');
+    assert.strictEqual(padded.body.top.document, 'q.md', 'trimmed query still hits the doc');
+    const logs = await get(`http://localhost:${port}/api/admin/logs`);
+    assert.strictEqual(logs.body.logs.length, 1);
+    assert.strictEqual(logs.body.logs[0].query, '诊所以什么时间开门', 'log stores the trimmed query');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('server-side: unknown domain falls back to general preset', async () => {
   const { kb, server, port } = await startServer();
   const unknown = await post(`http://localhost:${port}/api/chat`, { query: 'xyz', domain: 'slackbot' });
