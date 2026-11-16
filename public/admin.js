@@ -16,15 +16,15 @@
   const TOKEN_KEY = 'ragdesk-admin-token';
   let token = localStorage.getItem(TOKEN_KEY) || '';
 
-  async function adminFetch(url, opts = {}) {
+  async function adminFetch(url, opts = {}, retried = false) {
     const headers = Object.assign({}, opts.headers);
     if (token) headers['x-admin-token'] = token;
     const res = await fetch(url, Object.assign({}, opts, { headers }));
-    if (res.status === 401) {
+    if (res.status === 401 && !retried) {
       token = (prompt('该后台需要访问令牌（RAGDESK_ADMIN_TOKEN），请输入：') || '').trim();
       if (token) {
         localStorage.setItem(TOKEN_KEY, token);
-        return adminFetch(url, opts); // retry once with the new token
+        return adminFetch(url, opts, true); // retry once; a still-401 response surfaces as an error, no re-prompt loop
       }
       localStorage.removeItem(TOKEN_KEY);
     }
@@ -45,13 +45,19 @@
 
   async function loadDocs() {
     const res = await adminFetch('/api/admin/docs');
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      docsBody.innerHTML =
+        `<tr><td colspan="8" class="dim">加载失败（HTTP ${res.status}）：${esc(data.error || '服务器未返回错误详情')}</td></tr>`;
+      return;
+    }
+    const docs = Array.isArray(data.docs) ? data.docs : [];
     statsEl.innerHTML =
-      `<div class="stat"><b>${data.docs.length}</b><span>文档</span></div>` +
-      `<div class="stat"><b>${data.docs.reduce((s, d) => s + (d.chunk_count || 0), 0)}</b><span>分块</span></div>`;
+      `<div class="stat"><b>${docs.length}</b><span>文档</span></div>` +
+      `<div class="stat"><b>${docs.reduce((s, d) => s + (d.chunk_count || 0), 0)}</b><span>分块</span></div>`;
     loadStats();
     docsBody.innerHTML = '';
-    for (const d of data.docs) {
+    for (const d of docs) {
       const tr = document.createElement('tr');
       const size = (d.size / 1024).toFixed(1) + ' KB';
       tr.innerHTML =
@@ -96,8 +102,12 @@
 
   async function loadLogs() {
     const res = await adminFetch('/api/admin/logs?limit=50');
-    const data = await res.json();
-    logsBody.innerHTML = '';
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      logsBody.innerHTML =
+        `<tr><td colspan="6" class="dim">加载失败（HTTP ${res.status}）：${esc(data.error || '服务器未返回错误详情')}</td></tr>`;
+      return;
+    }
     const rows = data.logs || [];
     if (rows.length === 0) {
       logsBody.innerHTML = '<tr><td colspan="6" class="dim">暂无查询记录</td></tr>';
