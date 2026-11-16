@@ -583,6 +583,31 @@ test('/api/admin/logs honors a valid limit (returns the requested row count)', a
   kb.close();
 });
 
+test('/api/admin/logs carries the top-doc filename join for answered queries', async () => {
+  const { kb, server, port } = await startServer();
+  // the admin table displays top_filename (admin.js); it comes from a LEFT
+  // JOIN in the storage layer, so lock the populated path end-to-end.
+  await kb.ingestBuffer('clinic.md', Buffer.from('本诊所工作日 8:00 开门，预约电话 010-8888。'));
+  const chat = await post(`http://localhost:${port}/api/chat`, { query: '诊所以什么时间开门' });
+  assert.strictEqual(chat.status, 200);
+  assert.ok(chat.body.citations.length > 0, 'query must hit the ingested doc');
+
+  const logs = await get(`http://localhost:${port}/api/admin/logs`);
+  assert.strictEqual(logs.status, 200);
+  const row = logs.body.logs[0];
+  assert.strictEqual(row.matched, chat.body.citations.length);
+  assert.strictEqual(row.top_filename, 'clinic.md', 'answered log must resolve the doc filename');
+  assert.strictEqual(row.top_doc_id, chat.body.top.docId);
+  assert.ok(typeof row.top_score === 'number');
+
+  // unanswered queries log a null top-doc join, which the UI renders as '-'
+  await post(`http://localhost:${port}/api/chat`, { query: '完全不存在的关键词' });
+  const missed = await get(`http://localhost:${port}/api/admin/logs`);
+  assert.strictEqual(missed.body.logs[0].top_filename, null);
+  server.close();
+  kb.close();
+});
+
 test('widget script is served and self-contained', async () => {
   const { kb, server, port } = await startServer();
   const res = await get(`http://localhost:${port}/widget.js`);
