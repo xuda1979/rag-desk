@@ -224,3 +224,23 @@ test('UTF-8 BOM in md/txt files is stripped during chunking (Windows/Excel expor
   assert.ok(ans.top, 'BOM must not break CJK search');
   kb.close();
 });
+
+test('ingestDir returns per-file results; misses report errors, indexable files store', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ragdesk-ingest-'));
+  fs.writeFileSync(path.join(dir, 'ok.md'), '律师咨询费按每小时 300 元收取。挂号请带身份证。');
+  fs.writeFileSync(path.join(dir, 'data.csv'), '主题,内容\n咨询费,按小时计费\n');
+  fs.writeFileSync(path.join(dir, 'bad.xyz'), 'nope');
+  fs.writeFileSync(path.join(dir, 'blank.md'), '  \n');
+  const res = await kb.ingestDir(dir);
+  assert.strictEqual(res.length, 4, 'every file gets exactly one result entry');
+  const byName = Object.fromEntries(res.map((r) => [r.filename, r]));
+  assert.strictEqual(byName['ok.md'].action, 'indexed');
+  assert.strictEqual(byName['data.csv'].action, 'indexed');
+  assert.strictEqual(byName['bad.xyz'].action, 'error', 'unsupported ext is an error');
+  assert.match(byName['bad.xyz'].error, /不支持的文件类型/);
+  assert.strictEqual(byName['blank.md'].action, 'error', 'whitespace-only file is an error');
+  assert.strictEqual(kb.getAllDocs().length, 2, 'only the two indexable files become docs');
+  await assert.rejects(() => kb.ingestDir(path.join(dir, 'nope')), /ENOENT/, 'missing dir rejects');
+  kb.close();
+});
