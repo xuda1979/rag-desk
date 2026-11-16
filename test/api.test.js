@@ -473,6 +473,36 @@ test('DELETE of a missing document returns 404', async () => {
   kb.close();
 });
 
+test('non-numeric doc id returns JSON 404, never a 500', async () => {
+  const { kb, server, port } = await startServer();
+  await kb.ingestBuffer('id.md', Buffer.from('疫苗接种时间每周二、周四、周六上午。'));
+  for (const path of ['/api/admin/docs/abc', '/api/admin/docs/4.5.6']) {
+    const res = await get(`http://localhost:${port}${path}`);
+    assert.strictEqual(res.status, 404, `${path} must 404`);
+    assert.strictEqual(res.body.error, 'not found');
+  }
+  const del = await new Promise((resolve, reject) => {
+    http
+      .request({ host: 'localhost', port, path: '/api/admin/docs/abc', method: 'DELETE' }, (r) => {
+        let out = '';
+        r.on('data', (c) => (out += c));
+        r.on('end', () => {
+          try {
+            resolve({ status: r.statusCode, body: JSON.parse(out) });
+          } catch (_) {
+            resolve({ status: r.statusCode, body: out });
+          }
+        });
+      })
+      .on('error', reject)
+      .end();
+  });
+  assert.strictEqual(del.status, 404, 'DELETE with a non-numeric id must 404, not crash');
+  assert.strictEqual(del.body.error, 'not found');
+  server.close();
+  kb.close();
+});
+
 test('DELETE of an existing document removes it from list and search', async () => {
   const { kb, server, port } = await startServer();
   await kb.ingestBuffer('del.md', Buffer.from('疫苗接种时间每周二、周四、周六上午。'));
@@ -586,6 +616,107 @@ test('static pages served', async () => {
   kb.close();
 });
 
+test('CORS preflight passes without credentials even when endpoint auth is on', async () => {
+  const { kb, server, port } = await startServer({ adminToken: 'adm', chatToken: 'ch0' });
+  // browsers always send the preflight before the credentialed request; a
+  // token-gated route must still answer the OPTIONS with 204 so the widget
+  // chat and admin DELETE actually fire.
+  const admin = await new Promise((resolve, reject) => {
+    http
+      .request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/admin/docs/1',
+          method: 'OPTIONS',
+          headers: { Origin: 'https://console.example', 'Access-Control-Request-Method': 'DELETE' },
+        },
+        (r) => {
+          r.resume();
+          r.on('end', () => resolve({ status: r.statusCode, allowOrigin: r.headers['access-control-allow-origin'] }));
+        }
+      )
+      .on('error', reject)
+      .end();
+  });
+  assert.strictEqual(admin.status, 204, 'admin preflight without x-admin-token must pass');
+  assert.strictEqual(admin.allowOrigin, 'https://console.example');
+
+  const chat = await new Promise((resolve, reject) => {
+    http
+      .request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/chat',
+          method: 'OPTIONS',
+          headers: { Origin: 'https://customer.example', 'Access-Control-Request-Method': 'POST' },
+        },
+        (r) => {
+          r.resume();
+          r.on('end', () => resolve({ status: r.statusCode, allowOrigin: r.headers['access-control-allow-origin'] }));
+        }
+      )
+      .on('error', reject)
+      .end();
+  });
+  assert.strictEqual(chat.status, 204, 'chat preflight without Authorization must pass');
+  assert.strictEqual(chat.allowOrigin, 'https://customer.example');
+  server.close();
+  kb.close();
+});
+
+test('admin upload with no files returns a stable JSON 400', async () => {
+  const { kb, server, port } = await startServer();
+  // POST with no multipart body at all
+  const noBody = await new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: 'localhost', port, path: '/api/admin/upload', method: 'POST' },
+      (r) => {
+        let out = '';
+        r.on('data', (c) => (out += c));
+        r.on('end', () => {
+          try {
+            resolve({ status: r.statusCode, body: JSON.parse(out) });
+          } catch (_) {
+            resolve({ status: r.statusCode, body: out });
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
+  assert.strictEqual(noBody.status, 400);
+  assert.strictEqual(noBody.body.error, 'no files', 'empty upload must name the reason');
+
+  // multipart with zero file parts
+  const boundary = '----rd-none';
+  const emptyMulti = Buffer.from(`--${boundary}--\r\n`);
+  const noFiles = await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: 'localhost',
+        port,
+        path: '/api/admin/upload',
+        method: 'POST',
+        headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': emptyMulti.length },
+      },
+      (r) => {
+        let out = '';
+        r.on('data', (c) => (out += c));
+        r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+      }
+    );
+    req.on('error', reject);
+    req.write(emptyMulti);
+    req.end();
+  });
+  assert.strictEqual(noFiles.status, 400);
+  assert.strictEqual(noFiles.body.error, 'no files');
+  server.close();
+  kb.close();
+});
 test('/api/domains returns preset domains with labels and example questions', async () => {
   const { kb, server, port } = await startServer();
   const res = await get(`http://localhost:${port}/api/domains`);
