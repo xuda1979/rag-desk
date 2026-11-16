@@ -105,7 +105,11 @@ test('offline mode returns answer without any LLM/embedding (AC3)', () => {
 test('answer on empty corpus gives graceful fallback', () => {
   const kb = new KnowledgeBase(tempDb());
   const ans = kb.answer('完全不存在的问题关键词');
-  assert.strictEqual(ans.answer, kb.getSetting('__nope__') ? '' : String(ans.answer).length > 0 ? ans.answer : '');
+  assert.strictEqual(ans.mode, 'offline-retrieval');
+  assert.strictEqual(ans.domain, 'general');
+  assert.strictEqual(ans.confidence, 0);
+  assert.match(ans.answer, /没有找到相关内容/, 'should use the general domain fallback');
+  assert.strictEqual(ans.llm, false);
   assert.strictEqual(ans.top, null);
   assert.deepStrictEqual(ans.citations, []);
   kb.close();
