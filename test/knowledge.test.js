@@ -206,6 +206,20 @@ test('mockSummarizer picks the first sentence longer than 8 chars', async () => 
   assert.ok(out.includes('模拟 LLM 摘要'));
 });
 
+test('answerWithLlm propagates a summarizer rejection (never answers garbage)', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  await kb.ingestBuffer('boom.md', Buffer.from('咨询费按小时计费，合同纠纷在被告住所地人民法院起诉。'));
+  const failing = async () => {
+    throw new Error('LLM upstream timeout');
+  };
+  await assert.rejects(
+    () => kb.answerWithLlm('咨询费', { summarizer: failing }),
+    /LLM upstream timeout/,
+    'a failing summarizer must reject, not produce a fake answer'
+  );
+  kb.close();
+});
+
 test('retrieval honors explicit limits; answer caps citations by limit', async () => {
   const kb = new KnowledgeBase(tempDb());
   for (let i = 1; i <= 6; i++) {
