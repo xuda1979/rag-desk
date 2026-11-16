@@ -281,6 +281,16 @@ test('widget script is served and self-contained', async () => {
   kb.close();
 });
 
+test('widget script supports RAGDESK_CHAT_TOKEN via data-token', async () => {
+  const { kb, server, port } = await startServer({ chatToken: 'chatTok' });
+  const res = await get(`http://localhost:${port}/widget.js`);
+  assert.strictEqual(res.status, 200);
+  assert.match(res.body, /getAttribute\('data-token'\)/);
+  assert.match(res.body, /headers\.Authorization = 'Bearer ' \+ TOKEN/);
+  server.close();
+  kb.close();
+});
+
 test('static pages served', async () => {
   const { kb, server, port } = await startServer();
   const idx = await get(`http://localhost:${port}/`);

@@ -176,7 +176,9 @@
 
   页面右下角会出现悬浮聊天按钮，点击展开/收起；用户提问即调用 data-api 指定
   的问答接口。跨域访问由服务器端 RAGDESK_ALLOW_ORIGIN 控制；如设置了
-  RAGDESK_CHAT_TOKEN，请确保请求携带正确的 Bearer 令牌（浮窗配置项）。
+  RAGDESK_CHAT_TOKEN，请在 script 标签上增加浮窗配置项
+  data-token="<令牌>"，浮窗会自动在请求头携带
+  Authorization: Bearer <令牌>。
 
 3.6  HTTP 接口调用示例
 --------------------------------------------------------------------------------

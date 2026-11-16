@@ -8,6 +8,7 @@
  *     data-domain="legal"
  *     data-title="律所在线咨询"
  *     data-greeting="您好，请问有什么可以帮您？"
+ *     data-token="<chat token, only if RAGDESK_CHAT_TOKEN is set>"
  *   ></script>
  *
  * The widget renders a floating button bottom-right, opens a chat panel, and
@@ -28,6 +29,7 @@
   var DOMAIN = script.getAttribute('data-domain') || 'general';
   var TITLE = script.getAttribute('data-title') || '知识库助手';
   var GREETING = script.getAttribute('data-greeting') || '您好，我是您的知识库助手，请问有什么可以帮您？';
+  var TOKEN = script.getAttribute('data-token') || '';
 
   var css = [
     '#ragdesk-fab{position:fixed;right:20px;bottom:20px;width:56px;height:56px;border-radius:50%;',
@@ -83,9 +85,11 @@
   }
 
   function ask(q) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (TOKEN) headers.Authorization = 'Bearer ' + TOKEN;
     fetch(API, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify({ query: q, domain: DOMAIN }),
     })
       .then(function (r) { return r.json(); })

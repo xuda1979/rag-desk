@@ -93,7 +93,8 @@ docker compose up --build
   data-api="http://localhost:3000/api/chat"
   data-domain="medical"
   data-title="诊所在线咨询"
-  data-greeting="您好，我是诊所在线导诊助手。"></script>
+  data-greeting="您好，我是诊所在线导诊助手。"
+  data-token="<chat token，仅当设置了 RAGDESK_CHAT_TOKEN 时填写>"></script>
 ```
 
 ## 测试
