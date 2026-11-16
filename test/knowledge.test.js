@@ -279,6 +279,22 @@ test('ingestFile reads a path, stores basename, dedupes and rejects unsupported 
   kb.close();
 });
 
+test('ingestDir skips nested directories (non-recursive)', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ragdesk-ing-'));
+  fs.writeFileSync(path.join(dir, 'ok.md'), '律师咨询费按小时计费。');
+  fs.mkdirSync(path.join(dir, 'nested'));
+  fs.writeFileSync(path.join(dir, 'nested', 'inner.md'), '挂号请带身份证。');
+  const res = await kb.ingestDir(dir);
+  assert.deepStrictEqual(res.map((r) => r.filename), ['ok.md'], 'one result per top-level file, none for the dir');
+  assert.deepStrictEqual(
+    kb.getAllDocs().map((d) => d.filename),
+    ['ok.md'],
+    'nested files are not recursed into'
+  );
+  kb.close();
+});
+
 test('ingestDir returns per-file results; misses report errors, indexable files store', async () => {
   const kb = new KnowledgeBase(tempDb());
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ragdesk-ingest-'));
