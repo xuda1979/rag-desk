@@ -320,6 +320,8 @@ test('prod: server.js boot seeds a fresh DB, gates admin, answers chat, and skip
           RAGDESK_DB: db,
           PORT: String(port),
           RAGDESK_ADMIN_TOKEN: 'boot-tok',
+          RAGDESK_CHAT_TOKEN: 'boot-chat',
+          RAGDESK_ALLOW_ORIGIN: 'https://boot.customer.example',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -379,12 +381,38 @@ test('prod: server.js boot seeds a fresh DB, gates admin, answers chat, and skip
     // chat answers against the seeded corpus
     const chat = await fetch(`http://127.0.0.1:${port1}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer boot-chat' },
       body: JSON.stringify({ query: '常年法律顾问' }),
     });
     assert.strictEqual(chat.status, 200);
     const chatBody = await chat.json();
     assert.ok(chatBody.answer.length > 0, 'booted server should answer queries');
+
+    // RAGDESK_CHAT_TOKEN bearer gate is live on the booted process
+    const chatDenied = await fetch(`http://127.0.0.1:${port1}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer wrong' },
+      body: JSON.stringify({ query: '常年法律顾问' }),
+    });
+    assert.strictEqual(chatDenied.status, 401);
+
+    // RAGDESK_ALLOW_ORIGIN is reflected to the allowed origin and replaces
+    // foreign origins on real responses (the CORS-wildcard/reflect contract)
+    const corsAllowed = await fetch(`http://127.0.0.1:${port1}/api/health`, {
+      headers: { Origin: 'https://boot.customer.example' },
+    });
+    assert.strictEqual(
+      corsAllowed.headers.get('access-control-allow-origin'),
+      'https://boot.customer.example'
+    );
+    const corsForeign = await fetch(`http://127.0.0.1:${port1}/api/health`, {
+      headers: { Origin: 'https://evil.example' },
+    });
+    assert.strictEqual(
+      corsForeign.headers.get('access-control-allow-origin'),
+      'https://boot.customer.example',
+      'configured allow-origin must replace unknown origins'
+    );
 
     await b1.kill();
     b1 = null;
