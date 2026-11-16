@@ -314,3 +314,17 @@ test('ingestDir returns per-file results; misses report errors, indexable files 
   await assert.rejects(() => kb.ingestDir(path.join(dir, 'nope')), /ENOENT/, 'missing dir rejects');
   kb.close();
 });
+
+test('settings persist across KnowledgeBase close/reopen; defaults when missing', () => {
+  const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ragdesk-set-')), 'kb.db');
+  const kb1 = new KnowledgeBase(dbPath);
+  kb1.setSetting('domain', 'legal');
+  kb1.setSetting('greeting', '您好，我是法律助手。');
+  kb1.close();
+
+  const kb2 = new KnowledgeBase(dbPath);
+  assert.strictEqual(kb2.getSetting('domain'), 'legal', 'value survives close/reopen');
+  assert.strictEqual(kb2.getSetting('greeting'), '您好，我是法律助手。');
+  assert.strictEqual(kb2.getSetting('nope', 'dflt'), 'dflt', 'missing key returns the default');
+  kb2.close();
+});
