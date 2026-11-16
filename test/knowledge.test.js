@@ -26,6 +26,32 @@ test('excerptFrom: no-anchor fallback heads the body or returns it whole', () =>
   kb.close();
 });
 
+test('excerptFrom: anchor path windows around the first query hit with ellipses', () => {
+  const kb = new KnowledgeBase(tempDb());
+  // anchor in the middle -> window starts before the hit with a leading ellipsis
+  const mid = '这是开头的铺垫内容，没有太大的信息量。'.repeat(3) + '关键锚点词在这里：心脏支架手术需提前预约。';
+  const e1 = kb.excerptFrom(mid, '心脏支架', 60);
+  assert.ok(e1.startsWith('…'), 'mid-body anchor should be preceded by an ellipsis');
+  assert.ok(e1.includes('心脏支架'), 'anchor term must survive the window');
+  assert.ok(e1.length <= 61, `window respects width (leading … plus width), got length ${e1.length}`);
+
+  // anchor at the very start -> no ellipsis, opening kept intact
+  const e2 = kb.excerptFrom('心脏支架手术咨询费说明，后面是一堆内容。', '心脏支架', 40);
+  assert.ok(e2.startsWith('心脏支架'), 'start anchor keeps the body opening');
+  assert.ok(!e2.includes('…'), 'no ellipsis when the window begins at the body start');
+  assert.strictEqual(e2, '心脏支架手术咨询费说明，后面是一堆内容。', 'short body is returned whole');
+
+  // anchor near the end -> window shifts back so the anchor still fits
+  const tail = '内容铺垫。'.repeat(30) + '最后的关键词是血压测量。';
+  const e3 = kb.excerptFrom(tail, '血压测量', 40);
+  assert.ok(e3.startsWith('…'), 'shifted-back window still carries a leading ellipsis');
+  assert.ok(e3.includes('血压测量'), 'end anchor must sit inside the shifted window');
+
+  // short body with an anchor -> whole body, no ellipsis
+  assert.strictEqual(kb.excerptFrom('血压测量方法。', '血压', 60), '血压测量方法。');
+  kb.close();
+});
+
 test('chunker: splits long text into overlapping windows with paragraph packing', () => {
   const long = Array.from({ length: 60 }, (_, i) => `第${i}句内容。`).join('');
   const chunks = chunkText(long + '\n\n' + '短段。');
