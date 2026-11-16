@@ -361,6 +361,52 @@ test('admin upload endpoint rejects an empty file (no 0-chunk docs)', async () =
   kb.close();
 });
 
+test('admin upload of whitespace-only text yields the exact empty-content per-file error', async () => {
+  // A supported-extension file whose text is non-empty but trims to zero
+  // chunks must produce the 文件内容为空 error (chunkText trims its input).
+  // distinct from the truly-empty-buffer case: the extractor hands back a
+  // non-empty string here, so only the chunker's trim can reject it.
+  const { kb, server, port } = await startServer();
+  const boundary = '----rd-ws';
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="blank.txt"\r\nContent-Type: text/plain\r\n\r\n  \n \t \n  \r\n`
+    ),
+    Buffer.from(`--${boundary}--\r\n`),
+  ]);
+  try {
+    const res = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/admin/upload',
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+        }
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+    // 200 with a per-file error result, not a 4xx: upload is per-file results
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.body.results, [
+      { filename: 'blank.txt', action: 'error', error: '文件内容为空，无法索引: blank.txt' },
+    ]);
+    const docs = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(docs.body.docs.length, 0, 'nothing may be persisted for an empty-content upload');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin upload endpoint reports per-file results for a mixed batch', async () => {
   const { kb, server, port } = await startServer();
   const boundary = '----rd-mix';
