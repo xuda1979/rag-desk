@@ -292,6 +292,8 @@ test('admin upload endpoint reports per-file results for a mixed batch', async (
   assert.strictEqual(res.body.results.length, 2, 'one result per uploaded file');
   const byName = Object.fromEntries(res.body.results.map((r) => [r.filename, r]));
   assert.strictEqual(byName['good.md'].action, 'indexed');
+  assert.strictEqual(byName['good.md'].docId, 1, 'indexed result carries the stable doc id');
+  assert.strictEqual(byName['good.md'].chunks, 1, 'indexed result reports the chunk count admin.js renders');
   assert.strictEqual(byName['bad.xyz'].action, 'error');
   assert.match(byName['bad.xyz'].error, /不支持的文件类型/);
   const docs = await get(`http://localhost:${port}/api/admin/docs`);
