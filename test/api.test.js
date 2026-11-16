@@ -990,6 +990,128 @@ test('CORS preflight passes without credentials even when endpoint auth is on', 
   kb.close();
 });
 
+test('token-gated admin and chat endpoints reject without their tokens', async () => {
+  const { kb, server, port } = await startServer({ adminToken: 'adm0', chatToken: 'ch0' });
+  try {
+    // Admin gate: RAGDESK_ADMIN_TOKEN set -> /api/admin/* must require the
+    // x-admin-token header, including reading the audit trail and mutating.
+    const docsNoAuth = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(docsNoAuth.status, 401);
+    assert.strictEqual(docsNoAuth.body.error, 'unauthorized: missing or invalid x-admin-token');
+
+    const docsWrong = await new Promise((resolve, reject) => {
+      http
+        .request(
+          { host: 'localhost', port, path: '/api/admin/docs', method: 'GET', headers: { 'x-admin-token': 'nope' } },
+          (r) => {
+            r.resume();
+            r.on('end', () => resolve(r.statusCode));
+          }
+        )
+        .on('error', reject)
+        .end();
+    });
+    assert.strictEqual(docsWrong, 401, 'wrong admin token must also be rejected');
+
+    const docDeleteWrong = await new Promise((resolve, reject) => {
+      http
+        .request(
+          { host: 'localhost', port, path: '/api/admin/docs/1', method: 'DELETE', headers: { 'x-admin-token': 'nope' } },
+          (r) => {
+            r.resume();
+            r.on('end', () => resolve(r.statusCode));
+          }
+        )
+        .on('error', reject)
+        .end();
+    });
+    assert.strictEqual(docDeleteWrong, 401, 'admin mutation must be token-gated');
+
+    // Chat gate: RAGDESK_CHAT_TOKEN set -> /api/chat requires Bearer. The body
+    // is valid JSON even without auth, so a 401 here proves the gate, not a
+    // validation error.
+    const chatNoAuth = await post(`http://localhost:${port}/api/chat`, { query: '诊所几点开门' });
+    assert.strictEqual(chatNoAuth.status, 401);
+    assert.strictEqual(chatNoAuth.body.error, 'unauthorized');
+
+    const chatWrong = await post(`http://localhost:${port}/api/chat`, { query: '诊所几点开门' });
+    // same helper has no header knob; craft the request directly to assert 401
+    // is about the token, not the payload shape.
+    const wrongTok = await new Promise((resolve, reject) => {
+      const data = JSON.stringify({ query: '诊所几点开门' });
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/chat',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: 'Bearer bad' },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+        }
+      );
+      req.on('error', reject);
+      req.write(data);
+      req.end();
+    });
+    assert.strictEqual(wrongTok.status, 401);
+    assert.strictEqual(wrongTok.body.error, 'unauthorized');
+
+    // Correct tokens (and only correct tokens) open the routes.
+    const health = await get(`http://localhost:${port}/api/health`);
+    assert.strictEqual(health.status, 200, 'health stays public');
+
+    const docsOk = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(docsOk.status, 401, 'plain GET still rejected');
+    const docsGood = await new Promise((resolve, reject) => {
+      http
+        .request(
+          { host: 'localhost', port, path: '/api/admin/docs', method: 'GET', headers: { 'x-admin-token': 'adm0' } },
+          (r) => {
+            let out = '';
+            r.on('data', (c) => (out += c));
+            r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+          }
+        )
+        .on('error', reject)
+        .end();
+    });
+    assert.strictEqual(docsGood.status, 200, 'correct admin token opens the docs list');
+
+    const chatGood = await new Promise((resolve, reject) => {
+      const data = JSON.stringify({ query: '诊所几点开门' });
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/chat',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(data),
+            Authorization: 'Bearer ch0',
+          },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+        }
+      );
+      req.on('error', reject);
+      req.write(data);
+      req.end();
+    });
+    assert.strictEqual(chatGood.status, 200, 'correct chat token opens /api/chat');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin upload with no files returns a stable JSON 400', async () => {
   const { kb, server, port } = await startServer();
   // POST with no multipart body at all
