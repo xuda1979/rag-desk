@@ -257,6 +257,51 @@ test('admin upload endpoint rejects an empty file (no 0-chunk docs)', async () =
   kb.close();
 });
 
+test('admin upload endpoint reports per-file results for a mixed batch', async () => {
+  const { kb, server, port } = await startServer();
+  const boundary = '----rd-mix';
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="good.md"\r\nContent-Type: text/markdown\r\n\r\n律师咨询费按小时计费。\r\n`
+    ),
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="bad.xyz"\r\nContent-Type: application/octet-stream\r\n\r\nnope\r\n`
+    ),
+    Buffer.from(`--${boundary}--\r\n`),
+  ]);
+  const res = await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: 'localhost',
+        port,
+        path: '/api/admin/upload',
+        method: 'POST',
+        headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length },
+      },
+      (r) => {
+        let out = '';
+        r.on('data', (c) => (out += c));
+        r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.results.length, 2, 'one result per uploaded file');
+  const byName = Object.fromEntries(res.body.results.map((r) => [r.filename, r]));
+  assert.strictEqual(byName['good.md'].action, 'indexed');
+  assert.strictEqual(byName['bad.xyz'].action, 'error');
+  assert.match(byName['bad.xyz'].error, /不支持的文件类型/);
+  const docs = await get(`http://localhost:${port}/api/admin/docs`);
+  assert.strictEqual(docs.body.docs.length, 1, 'only the indexable file is persisted');
+  const ans = await post(`http://localhost:${port}/api/chat`, { query: '咨询费怎么收' });
+  assert.strictEqual(ans.body.top.document, 'good.md', 'good file is retrievable after mixed upload');
+  server.close();
+  kb.close();
+});
+
 test('admin upload endpoint rejects an unsupported file type', async () => {
   const { kb, server, port } = await startServer();
   const boundary = '----rd-type';
