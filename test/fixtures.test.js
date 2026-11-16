@@ -6,7 +6,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const { KnowledgeBase } = require('../src/lib/knowledge');
-const { ensureCorpusFiles } = require('../scripts/seed-fixtures');
+const { ensureCorpusFiles, seedIfNeeded } = require('../scripts/seed-fixtures');
 const { buildPdfFixture } = require('../scripts/make-pdf-fixture');
 const { extractDocx, parseCsv } = require('../src/lib/extractors');
 
@@ -90,4 +90,27 @@ test('parseCsv strips a UTF-8 BOM', () => {
   assert.strictEqual(rows[0][0], '问题', 'BOM must not leak into the first field');
   assert.strictEqual(rows[0][1], '回答');
   assert.strictEqual(rows[1][0], '挂号需要带什么');
+});
+
+test('seedIfNeeded returns added/skipped and is idempotent by sha256', async () => {
+  await ensureCorpusFiles();
+  const kb = freshKb();
+
+  const first = await seedIfNeeded(kb, { force: false });
+  assert.ok(first.added >= 10, `expected >=10 added on first seed, got ${first.added}`);
+  assert.strictEqual(first.skipped, 0, 'nothing is skipped on a fresh KB');
+
+  const docCount = kb.getAllDocs().length;
+  const second = await seedIfNeeded(kb, { force: false });
+  assert.strictEqual(second.added, 0, 're-seeding identical content adds nothing');
+  assert.strictEqual(second.skipped, first.added, 'unchanged files are skipped by sha');
+  assert.strictEqual(kb.getAllDocs().length, docCount, 'no duplicate docs after re-seed');
+
+  // force only bypasses the sha pre-check; ingestBuffer still dedups identical
+  // content (duplicate action), so unchanged files are skipped rather than re-added
+  const forced = await seedIfNeeded(kb, { force: true });
+  assert.strictEqual(forced.added, 0, 'force with unchanged content must not re-index');
+  assert.strictEqual(forced.skipped, first.added);
+  assert.strictEqual(kb.getAllDocs().length, docCount);
+  kb.close();
 });
