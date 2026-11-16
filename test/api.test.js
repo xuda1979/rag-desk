@@ -610,6 +610,34 @@ test('/api/admin/logs carries the top-doc filename join for answered queries', a
   kb.close();
 });
 
+test('/api/admin/logs rows carry the created_at/query/domain fields the admin table renders', async () => {
+  const { kb, server, port } = await startServer();
+  // admin.js renders l.created_at, l.query, l.domain, l.matched, l.top_score
+  // and l.top_filename per log row; the latter three are locked elsewhere, so
+  // pin the remaining three shapes at the wire level. try/finally keeps the
+  // server closed on assertion failure so a failing test cannot leak a handle
+  // and hang the whole runner.
+  try {
+    await kb.ingestBuffer('bid.md', Buffer.from('投标截止时间为每周五下午五点，逾期不予受理。'));
+    const query = '投标截止时间是什么时候';
+    const chat = await post(`http://localhost:${port}/api/chat`, { query, domain: 'procurement' });
+    assert.strictEqual(chat.status, 200);
+    assert.ok(chat.body.citations.length > 0, 'query must hit the ingested doc');
+
+    const logs = await get(`http://localhost:${port}/api/admin/logs`);
+    assert.strictEqual(logs.status, 200);
+    assert.strictEqual(logs.body.logs.length, 1);
+    const row = logs.body.logs[0];
+    assert.strictEqual(typeof row.created_at, 'string');
+    assert.ok(row.created_at.length > 0, 'created_at must be a populated timestamp string');
+    assert.strictEqual(row.query, query, 'log must carry the exact query the chat endpoint received');
+    assert.strictEqual(row.domain, 'procurement', 'log must carry the domain the request selected');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/chat citations carry the docId/document/paragraph/excerpt fields the frontends render', async () => {
   const { kb, server, port } = await startServer();
   // demo.js renders c.document, §c.paragraph and c.excerpt (sliced to 160
