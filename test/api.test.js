@@ -1668,3 +1668,53 @@ test('/api/admin/docs rows carry sha256, status and mime; detail chunks expose e
     kb.close();
   }
 });
+
+test('/api/admin/logs body is { logs, stats } and each row carries the full queries_log shape', async () => {
+  const { kb, server, port } = await startServer();
+  // listQueryLogs returns q.* (id/query/domain/matched/top_score/top_doc_id/
+  // source/created_at) plus a LEFT-JOIN top_filename; the JSON body also embeds
+  // the shared stats object. Per-field assertions exist elsewhere, but no test
+  // pins the complete row key set (an added/renamed column would slip through)
+  // nor the body-level { logs, stats } shape the admin panel reads from.
+  await kb.ingestBuffer('clinic.md', Buffer.from('本诊所工作日 8:00 开门，周六日 9:00 开门。预约电话 010-1234。'));
+  try {
+    const chat = await post(`http://localhost:${port}/api/chat`, { query: '诊所以什么时间开门' });
+    assert.strictEqual(chat.status, 200);
+    assert.ok(chat.body.citations.length >= 1, 'query must hit the ingested doc');
+
+    const res = await get(`http://localhost:${port}/api/admin/logs`);
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(
+      Object.keys(res.body).sort(),
+      ['logs', 'stats'],
+      'the logs response body carries exactly logs + stats'
+    );
+    assert.deepStrictEqual(
+      res.body.stats,
+      { total: 1, with_answer: 1 },
+      'embedded stats must match the standalone /api/admin/stats contract'
+    );
+    assert.strictEqual(res.body.logs.length, 1);
+    const row = res.body.logs[0];
+
+    // exact row key set, deliberately including top_filename only on the wire
+    assert.deepStrictEqual(
+      Object.keys(row).sort(),
+      ['created_at', 'domain', 'id', 'matched', 'query', 'source', 'top_doc_id', 'top_filename', 'top_score'],
+      'every queries_log column plus the LEFT-JOIN filename'
+    );
+    assert.strictEqual(row.id, 1);
+    assert.strictEqual(row.query, '诊所以什么时间开门');
+    assert.strictEqual(row.domain, 'general');
+    assert.strictEqual(row.matched, chat.body.citations.length);
+    assert.strictEqual(row.source, 'api', 'chat-endpoint queries are logged with source="api"');
+    assert.strictEqual(row.top_doc_id, chat.body.top.docId);
+    assert.strictEqual(row.top_filename, 'clinic.md');
+    assert.strictEqual(row.top_score, chat.body.confidence, 'top_score mirrors the answer-level confidence of the top doc');
+    assert.strictEqual(typeof row.created_at, 'string');
+    assert.ok(row.created_at.length > 0);
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
