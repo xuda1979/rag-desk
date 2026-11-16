@@ -31,12 +31,25 @@
     return res;
   }
 
+  async function loadStats() {
+    const res = await adminFetch('/api/admin/stats');
+    if (!res.ok) return;
+    const data = await res.json();
+    const s = data.stats || { total: 0, with_answer: 0 };
+    const hit = s.total > 0 ? Math.round((s.with_answer / s.total) * 100) + '%' : '-';
+    statsEl.innerHTML +=
+      `<div class="stat"><b>${s.total}</b><span>总查询</span></div>` +
+      `<div class="stat"><b>${s.with_answer}</b><span>有回答命中</span></div>` +
+      `<div class="stat"><b>${hit}</b><span>命中率</span></div>`;
+  }
+
   async function loadDocs() {
     const res = await adminFetch('/api/admin/docs');
     const data = await res.json();
     statsEl.innerHTML =
       `<div class="stat"><b>${data.docs.length}</b><span>文档</span></div>` +
       `<div class="stat"><b>${data.docs.reduce((s, d) => s + (d.chunk_count || 0), 0)}</b><span>分块</span></div>`;
+    loadStats();
     docsBody.innerHTML = '';
     for (const d of data.docs) {
       const tr = document.createElement('tr');

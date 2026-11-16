@@ -210,7 +210,7 @@ class Storage {
   queryLogStats() {
     return this.stmt(
       `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN matched > 0 THEN 1 ELSE 0 END) AS with_answer
+              COALESCE(SUM(CASE WHEN matched > 0 THEN 1 ELSE 0 END), 0) AS with_answer
        FROM queries_log`
     ).get();
   }

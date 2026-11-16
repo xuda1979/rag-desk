@@ -361,6 +361,7 @@ test('/api/admin/stats reports total and matched query counts', async () => {
   const before = await get(`http://localhost:${port}/api/admin/stats`);
   assert.strictEqual(before.status, 200);
   assert.strictEqual(before.body.stats.total, 0);
+  assert.strictEqual(before.body.stats.with_answer, 0, 'empty DB must report 0, not null');
 
   await kb.ingestBuffer('q.md', Buffer.from('本诊所工作日 8:00 开门。'));
   await post(`http://localhost:${port}/api/chat`, { query: '诊所以什么时间开门' });
