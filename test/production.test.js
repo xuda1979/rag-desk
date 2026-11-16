@@ -434,3 +434,55 @@ test('prod: server.js boot seeds a fresh DB, gates admin, answers chat, and skip
     if (b2) await b2.kill();
   }
 });
+
+test('prod: server.js creates the DB parent directory at boot (RAGDESK_DB into a missing nested path)', async () => {
+  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rd-bootdir-'));
+  const absentRoot = path.join(baseDir, 'app', 'data'); // deliberately NOT created
+  const dbPath = path.join(absentRoot, 'nested', 'ragdesk.db');
+
+  const freePort = () =>
+    new Promise((resolve, reject) => {
+      const probe = net.createServer();
+      probe.on('error', reject);
+      probe.listen(0, () => {
+        const p = probe.address().port;
+        probe.close(() => resolve(p));
+      });
+    });
+
+  const port = await freePort();
+  const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/server.js'], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      RAGDESK_DB: dbPath,
+      PORT: String(port),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let out = '';
+  child.stdout.on('data', (c) => (out += c));
+  child.stderr.on('data', (c) => (out += c));
+  const exited = new Promise((r) => child.on('exit', (code, signal) => r({ code, signal })));
+
+  try {
+    let last;
+    for (let i = 0; i < 60; i++) {
+      try {
+        const r = await fetch(`http://127.0.0.1:${port}/api/health`);
+        if (r.ok) break;
+        last = r;
+      } catch (_) {
+        /* not up yet */
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(fs.existsSync(dbPath), `db file should be created at ${dbPath}`);
+    assert.ok(fs.statSync(absentRoot).isDirectory(), `parent dirs should be created recursively (${absentRoot})`);
+    assert.ok(fs.statSync(path.dirname(dbPath)).isDirectory(), `db parent dir should exist (${path.dirname(dbPath)})`);
+    assert.ok(out.includes(`DB:     ${dbPath}`), 'boot should log the single DB path');
+  } finally {
+    if (child.exitCode === null) child.kill('SIGTERM');
+    await exited;
+  }
+});
