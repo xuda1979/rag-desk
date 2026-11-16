@@ -874,6 +874,32 @@ test('/api/admin/logs honors a valid limit (returns the requested row count)', a
   kb.close();
 });
 
+test('/api/admin/logs?limit=50 pages the newest 50 rows and the default caps at 100', async () => {
+  const { kb, server, port } = await startServer();
+  // admin.js loadLogs() always fetches &limit=50, so that exact page size is
+  // the contract the admin table actually renders. 101 queries put the server
+  // past both the 50-item page and the 100-row default cap.
+  try {
+    for (let i = 1; i <= 101; i++) {
+      const res = await post(`http://localhost:${port}/api/chat`, { query: `问题${i}关于咨询费` });
+      assert.strictEqual(res.status, 200);
+    }
+    const page = await get(`http://localhost:${port}/api/admin/logs?limit=50`);
+    assert.strictEqual(page.status, 200);
+    assert.strictEqual(page.body.logs.length, 50, 'the admin.js page request must return exactly 50 rows');
+    assert.deepStrictEqual(
+      page.body.logs.map((l) => l.query),
+      Array.from({ length: 50 }, (_, i) => `问题${101 - i}关于咨询费`),
+      'limit=50 must hand back the newest 50 queries first'
+    );
+    const full = await get(`http://localhost:${port}/api/admin/logs`);
+    assert.strictEqual(full.body.logs.length, 100, 'no limit defaults to a 100-row cap, not the full log');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/admin/logs lists queries newest-first, matching the admin table render order', async () => {
   const { kb, server, port } = await startServer();
   // admin.js appends rows top-down from the wire array; the storage layer
