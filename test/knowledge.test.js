@@ -144,3 +144,16 @@ test('punctuation/noise queries never throw and still match (FTS-safe)', async (
   assert.deepStrictEqual(noise, []);
   kb.close();
 });
+
+test('UTF-8 BOM in md/txt files is stripped during chunking (Windows/Excel exports)', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  const bom = Buffer.from('EFBBBF', 'hex');
+  await kb.ingestBuffer('notes.md', Buffer.concat([bom, Buffer.from('合同纠纷在被告住所地人民法院起诉。')]));
+  const doc = kb.getAllDocs()[0];
+  const chunks = kb.getDocChunks(doc.id);
+  assert.strictEqual(chunks.length, 1);
+  assert.strictEqual(chunks[0].body.charCodeAt(0), 0x5408, 'first char should be 合, not U+FEFF');
+  const ans = kb.answer('合同纠纷');
+  assert.ok(ans.top, 'BOM must not break CJK search');
+  kb.close();
+});
