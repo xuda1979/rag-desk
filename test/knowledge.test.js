@@ -206,6 +206,26 @@ test('mockSummarizer picks the first sentence longer than 8 chars', async () => 
   assert.ok(out.includes('模拟 LLM 摘要'));
 });
 
+test('mockSummarizer falls back to a generic line when nothing is long enough', async () => {
+  const { mockSummarizer } = require('../src/lib/knowledge');
+  const out = await mockSummarizer({ query: 'x', context: '短。\n嗯。' });
+  assert.ok(out.includes('模拟 LLM 摘要'));
+  assert.ok(out.includes('未找到相关内容。'), 'no sentence > 8 chars yields the fallback line');
+  assert.doesNotMatch(out, /短。/, 'short lines are not quoted as an answer');
+});
+
+test('answerWithLlm honors an explicit limit (citations capped by it)', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  for (let i = 1; i <= 4; i++) {
+    await kb.ingestBuffer(`d${i}.md`, Buffer.from(`咨询费收取规则第${i}条：按小时计费，合同纠纷在被告住所地人民法院起诉。`));
+  }
+  const capped = await kb.answerWithLlm('咨询费怎么收', { limit: 2, summarizer: async () => 'S' });
+  assert.strictEqual(capped.citations.length, 2, 'limit 2 caps the LLM citations');
+  const all = await kb.answerWithLlm('咨询费怎么收', { summarizer: async () => 'S' });
+  assert.strictEqual(all.citations.length, 4, 'default returns every matching chunk');
+  kb.close();
+});
+
 test('answerWithLlm propagates a summarizer rejection (never answers garbage)', async () => {
   const kb = new KnowledgeBase(tempDb());
   await kb.ingestBuffer('boom.md', Buffer.from('咨询费按小时计费，合同纠纷在被告住所地人民法院起诉。'));
