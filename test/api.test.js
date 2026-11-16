@@ -933,6 +933,27 @@ test('/api/admin/logs honors a valid limit (returns the requested row count)', a
   kb.close();
 });
 
+test('/api/admin/logs clamps a huge limit to the 1000-row ceiling', async () => {
+  const { kb, server, port } = await startServer();
+  // safeLimit() caps every valid limit at 1000 rows; the storage layer trusts
+  // whatever LIMIT it is handed, so exactly-1000 (not 1005 and not the 100-row
+  // default) proves the clamp fired instead of a coincidental ceiling.
+  try {
+    for (let i = 1; i <= 1005; i++) {
+      await kb.logQuery({ query: `问题${i}关于咨询费`, domain: 'general', matched: 0, topScore: null, topDocId: null, source: 'api' });
+    }
+    const huge = await get(`http://localhost:${port}/api/admin/logs?limit=1000000`);
+    assert.strictEqual(huge.status, 200);
+    assert.strictEqual(huge.body.logs.length, 1000, 'a valid but huge limit must be clamped to the 1000-row cap');
+
+    const moderate = await get(`http://localhost:${port}/api/admin/logs?limit=999`);
+    assert.strictEqual(moderate.body.logs.length, 999, 'limits under the ceiling pass through untouched');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/admin/logs?limit=50 pages the newest 50 rows and the default caps at 100', async () => {
   const { kb, server, port } = await startServer();
   // admin.js loadLogs() always fetches &limit=50, so that exact page size is
