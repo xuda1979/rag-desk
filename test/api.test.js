@@ -887,3 +887,29 @@ test('/api/admin/docs rows carry the size and created_at fields the admin table 
   server.close();
   kb.close();
 });
+
+test('/api/chat confidence is a [0,1] number: >0 for hits, exactly 0 for a miss', async () => {
+  const { kb, server, port } = await startServer();
+  // demo.js renders 置信度 Math.round(data.confidence*100)% gated on data.top;
+  // widget.js renders it unconditionally. Lock the contract on the wire so a
+  // storage/answer refactor cannot emit NaN/undefined that breaks the UIs.
+  await kb.ingestBuffer(
+    'notice.md',
+    Buffer.from('供应商须为境内注册并取得营业执照的企业。近三年无重大违法违规记录，须提供最近一年财务报表。')
+  );
+  const hit = await post(`http://localhost:${port}/api/chat`, { query: '供应商资格要求' });
+  assert.strictEqual(hit.status, 200);
+  assert.ok(hit.body.citations.length >= 1, 'query must hit the ingested doc');
+  assert.strictEqual(typeof hit.body.confidence, 'number');
+  assert.ok(Number.isFinite(hit.body.confidence), 'confidence must be finite');
+  assert.ok(hit.body.confidence > 0 && hit.body.confidence <= 1, 'a hit must report positive confidence');
+
+  // a nonsense query matches nothing: 0 confidence and no top doc
+  const miss = await post(`http://localhost:${port}/api/chat`, { query: 'qqqqq zzzzz xxxxx' });
+  assert.strictEqual(miss.status, 200);
+  assert.strictEqual(miss.body.citations.length, 0);
+  assert.strictEqual(miss.body.confidence, 0, 'a miss must report exactly 0 confidence');
+  assert.strictEqual(miss.body.top, null, 'a miss must report no top doc');
+  server.close();
+  kb.close();
+});
