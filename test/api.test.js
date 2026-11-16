@@ -1786,3 +1786,60 @@ test('admin upload reports exact per-action result shapes in one batch: indexed/
     kb.close();
   }
 });
+
+test('admin upload dedup keys on file bytes (sha256), not filename: same content under a new name duplicates', async () => {
+  const { kb, server, port } = await startServer();
+  // ingestion dedup compares the fed bytes' sha256 (knowledge.js ingestBuffer)
+  // before extension/parse; the admin table shows the filename of the ORIGINAL
+  // upload. Existing dedup tests re-upload under the SAME filename, so a
+  // refactor that keyed dedup on filename instead of content would pass.
+  // Re-uploading identical bytes under a different name must still duplicate
+  // and leave the stored doc (and its filename) untouched.
+  const contents = '张三 律师 收费 标准 按小时计费，先签合同后服务，具体价格面议。';
+  const boundary = '----rd-duprename';
+  const part = (name) =>
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="${name}"\r\nContent-Type: text/markdown\r\n\r\n${contents}\r\n`
+    );
+  const upload = (body) =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/admin/upload',
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+        }
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+  try {
+    const first = await upload(Buffer.concat([part('fee.md'), Buffer.from(`--${boundary}--\r\n`)]));
+    assert.strictEqual(first.status, 200);
+    assert.deepStrictEqual(first.body.results[0], { filename: 'fee.md', action: 'indexed', docId: 1, chunks: 1 });
+
+    // identical bytes, different name, different mime type — sha256 wins
+    const second = await upload(Buffer.concat([part('renamed-refund.md'), Buffer.from(`--${boundary}--\r\n`)]));
+    assert.strictEqual(second.status, 200);
+    assert.deepStrictEqual(
+      second.body.results[0],
+      { filename: 'renamed-refund.md', action: 'duplicate', docId: 1 },
+      "same content under a new name must still duplicate to the original doc"
+    );
+
+    const docs = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(docs.body.docs.length, 1, 'the rename must not add a second row');
+    assert.strictEqual(docs.body.docs[0].filename, 'fee.md', 'the stored doc keeps its original filename');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
