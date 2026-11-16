@@ -19,11 +19,9 @@ const {
 class KnowledgeBase {
   /**
    * @param {string} dbPath
-   * @param {{markdownLib?:object}} [opts]
    */
-  constructor(dbPath, opts = {}) {
+  constructor(dbPath) {
     this.storage = new Storage(dbPath);
-    this.markdownLib = opts.markdownLib || null; // optional plugin, e.g. marked
   }
 
   close() {
@@ -299,11 +297,6 @@ class KnowledgeBase {
       tokenizer: 'bigram-cjk + unicode61',
       storage: this.storage.dbPath,
     };
-  }
-
-  /** Set (or replace) the active markdown renderer plugin. */
-  setMarkdownLib(lib) {
-    this.markdownLib = lib;
   }
 }
 
