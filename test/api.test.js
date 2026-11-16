@@ -245,6 +245,31 @@ test('admin chunk listing: /api/admin/docs/:id returns chunks (view index)', asy
   kb.close();
 });
 
+test('multi-chunk doc: /api/admin/docs/:id lists chunks with contiguous ascending 1-based indexes', async () => {
+  const { kb, server, port } = await startServer();
+  try {
+    // A single no-newline run longer than the 400-char window yields several
+    // overlapping chunks; ordering there is the strongest chunk-listing contract.
+    const text = '本诊所工作日八点开门，预约电话零一零八八八八。'.repeat(60);
+    await kb.ingestBuffer('long.md', Buffer.from(text));
+    const doc = kb.getAllDocs()[0];
+
+    const res = await get(`http://localhost:${port}/api/admin/docs/${doc.id}`);
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.doc.filename, 'long.md');
+    assert.ok(res.body.chunks.length >= 2, 'expected a genuinely multi-chunk doc');
+    assert.deepStrictEqual(
+      res.body.chunks.map((c) => c.chunk_idx),
+      [...Array(res.body.chunks.length)].map((_, i) => i + 1),
+      'chunk indexes must be 1-based, ascending, and gap-free'
+    );
+    for (const c of res.body.chunks) assert.ok(c.body.length > 0, 'no empty chunk bodies');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin upload endpoint rejects an empty file (no 0-chunk docs)', async () => {
   const { kb, server, port } = await startServer();
   const boundary = '----rd-empty';
