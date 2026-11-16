@@ -826,3 +826,31 @@ test('CORS headers ride on actual responses, not just preflight', async () => {
   server.close();
   kb.close();
 });
+
+test('/api/admin/docs rows carry the size and created_at fields the admin table renders', async () => {
+  const { kb, server, port } = await startServer();
+  // admin.js renders d.size (KB), d.created_at, d.kind and d.chunk_count from
+  // the list rows; lock the full row shape so a storage refactor cannot drop
+  // a field the table depends on.
+  await kb.ingestBuffer('doc.md', Buffer.from('本诊所工作日 8:00 开门。' + 'x'.repeat(300)));
+  const res = await get(`http://localhost:${port}/api/admin/docs`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.docs.length, 1);
+  const row = res.body.docs[0];
+  assert.strictEqual(row.filename, 'doc.md');
+  assert.strictEqual(row.kind, 'markdown');
+  assert.strictEqual(typeof row.size, 'number');
+  assert.ok(row.size > 0, 'size must be the real byte count');
+  assert.ok(Number.isInteger(row.size));
+  assert.strictEqual(typeof row.created_at, 'string');
+  assert.ok(row.created_at.length > 0, 'created_at must be a populated timestamp string');
+  assert.strictEqual(typeof row.chunk_count, 'number');
+  assert.ok(row.chunk_count >= 1);
+
+  // the single-doc view carries the same fields for the detail panel
+  const detail = await get(`http://localhost:${port}/api/admin/docs/${row.id}`);
+  assert.strictEqual(detail.body.doc.size, row.size);
+  assert.strictEqual(detail.body.doc.created_at, row.created_at);
+  server.close();
+  kb.close();
+});
