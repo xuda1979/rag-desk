@@ -1516,3 +1516,49 @@ test('/api/chat confidence is a [0,1] number: >0 for hits, exactly 0 for a miss'
   server.close();
   kb.close();
 });
+
+test('/api/chat body is exactly the engine answer contract: full-payload lock', async () => {
+  const { kb, server, port } = await startServer();
+  // The per-field tests above pin individual values; this pin locks the WHOLE
+  // response body so an added/dropped/renamed key is caught, not just a value
+  // change. The miss path is fully deterministic (the general fallback is a
+  // constant), the hit path must equal kb.answer() verbatim (route = pure
+  // forward, no injected fields like a debug flag).
+  try {
+    // miss against an empty corpus: stable literal shape
+    const missQ = 'qqqqq zzzzz xxxxx';
+    const miss = await post(`http://localhost:${port}/api/chat`, { query: missQ, domain: 'general' });
+    assert.strictEqual(miss.status, 200);
+    assert.deepStrictEqual(miss.body, {
+      answer: '抱歉，知识库中没有找到相关内容。',
+      mode: 'offline-retrieval',
+      llm: false,
+      domain: 'general',
+      confidence: 0,
+      citations: [],
+      top: null,
+      query: missQ,
+    });
+
+    // hit: the wire body is exactly the engine result, byte for byte
+    await kb.ingestBuffer('vet.md', Buffer.from('本诊所工作日 8:00 开门，周六日 9:00 开门。预约电话 010-1234。'));
+    const hitQ = '诊所以什么时间开门';
+    const hit = await post(`http://localhost:${port}/api/chat`, { query: hitQ, domain: 'general' });
+    assert.strictEqual(hit.status, 200);
+    assert.deepStrictEqual(
+      hit.body,
+      kb.answer(hitQ, { domain: 'general', limit: 3 }),
+      'the route must forward the engine answer unchanged'
+    );
+
+    // top IS the first citation: UIs render top.document confidently, and the
+    // answer must actually embed the cited excerpt.
+    assert.deepStrictEqual(hit.body.top, hit.body.citations[0]);
+    assert.ok(hit.body.answer.startsWith('以下是知识库中与您问题最相关的原文片段：'));
+    assert.ok(hit.body.citations[0].excerpt.length > 0, 'a hit must carry a populated excerpt');
+    assert.ok(hit.body.answer.includes(hit.body.citations[0].excerpt), 'answer embeds the cited excerpt');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
