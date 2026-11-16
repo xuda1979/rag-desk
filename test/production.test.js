@@ -231,26 +231,27 @@ test('prod: 50MB upload limit enforced (LIMIT_FILE_SIZE -> 413 JSON)', async () 
   }
 });
 
-test('prod: server.js boot seeds a fresh DB, gates admin, and answers chat', async () => {
+test('prod: server.js boot seeds a fresh DB, gates admin, answers chat, and skips re-seed on later boots', async () => {
   const bootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rd-boot-'));
   const dbPath = path.join(bootDir, 'boot.db');
-  const port = await new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.on('error', reject);
-    probe.listen(0, () => {
-      const p = probe.address().port;
-      probe.close(() => resolve(p));
-    });
-  });
 
-  let child = null;
-  const runBoot = () =>
+  const freePort = () =>
     new Promise((resolve, reject) => {
-      child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/server.js'], {
+      const probe = net.createServer();
+      probe.on('error', reject);
+      probe.listen(0, () => {
+        const p = probe.address().port;
+        probe.close(() => resolve(p));
+      });
+    });
+
+  const boot = (port, db) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/server.js'], {
         cwd: path.join(__dirname, '..'),
         env: {
           ...process.env,
-          RAGDESK_DB: dbPath,
+          RAGDESK_DB: db,
           PORT: String(port),
           RAGDESK_ADMIN_TOKEN: 'boot-tok',
         },
@@ -260,43 +261,57 @@ test('prod: server.js boot seeds a fresh DB, gates admin, and answers chat', asy
       child.stdout.on('data', (c) => (out += c));
       child.stderr.on('data', (c) => (out += c));
       child.on('error', reject);
-      child.on('exit', (code, signal) => resolve({ code, signal, out }));
+      const exited = new Promise((r) => child.on('exit', (code, signal) => r({ code, signal })));
+      resolve({
+        out: () => out,
+        kill: () => {
+          if (child.exitCode === null) child.kill('SIGTERM');
+          return exited;
+        },
+      });
     });
 
-  try {
-    const boot = runBoot();
-    void boot;
-    let health;
-    let attempts = 0;
-    while (attempts < 40) {
+  const waitHealthy = async (port) => {
+    let last;
+    for (let i = 0; i < 60; i++) {
       try {
-        health = await fetch(`http://127.0.0.1:${port}/api/health`);
-        if (health.ok) break;
+        const r = await fetch(`http://127.0.0.1:${port}/api/health`);
+        if (r.ok) return r;
+        last = r;
       } catch (_) {
         /* not up yet */
       }
-      attempts += 1;
       await new Promise((r) => setTimeout(r, 100));
     }
-    assert.ok(health && health.ok, 'booted server should answer /api/health');
-    const healthBody = await health.json();
+    assert.fail(`server did not become healthy on port ${port} (last status ${last && last.status})`);
+  };
+
+  const port1 = await freePort();
+  const port2 = await freePort();
+  let b1 = null;
+  let b2 = null;
+  try {
+    b1 = await boot(port1, dbPath);
+    await waitHealthy(port1);
+    const healthBody = await (await fetch(`http://127.0.0.1:${port1}/api/health`)).json();
     assert.strictEqual(healthBody.ok, true);
     assert.strictEqual(healthBody.mode, 'offline');
 
-    // fresh DB -> fixture corpus auto-seeded -> admin can list 10+ docs
-    const docsRes = await fetch(`http://127.0.0.1:${port}/api/admin/docs`, {
+    // fresh DB -> fixture corpus auto-seeded
+    const docsRes = await fetch(`http://127.0.0.1:${port1}/api/admin/docs`, {
       headers: { 'x-admin-token': 'boot-tok' },
     });
     assert.strictEqual(docsRes.status, 200);
-    const docsBody = await docsRes.json();
-    assert.ok(docsBody.docs.length >= 10, `boot should seed the corpus, got ${docsBody.docs.length} docs`);
+    const firstCount = (await docsRes.json()).docs.length;
+    assert.ok(firstCount >= 10, `boot should seed the corpus, got ${firstCount} docs`);
+    assert.ok(/\[seed\] \d+ docs indexed/.test(b1.out()), 'first boot should log the seed');
 
     // admin token gate is live
-    const deny = await fetch(`http://127.0.0.1:${port}/api/admin/docs`);
+    const deny = await fetch(`http://127.0.0.1:${port1}/api/admin/docs`);
     assert.strictEqual(deny.status, 401);
 
     // chat answers against the seeded corpus
-    const chat = await fetch(`http://127.0.0.1:${port}/api/chat`, {
+    const chat = await fetch(`http://127.0.0.1:${port1}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: '常年法律顾问' }),
@@ -304,7 +319,24 @@ test('prod: server.js boot seeds a fresh DB, gates admin, and answers chat', asy
     assert.strictEqual(chat.status, 200);
     const chatBody = await chat.json();
     assert.ok(chatBody.answer.length > 0, 'booted server should answer queries');
+
+    await b1.kill();
+    b1 = null;
+
+    // second boot on the same DB: no re-seed, count unchanged
+    b2 = await boot(port2, dbPath);
+    await waitHealthy(port2);
+    const secondCount = (
+      await (await fetch(`http://127.0.0.1:${port2}/api/admin/docs`, {
+        headers: { 'x-admin-token': 'boot-tok' },
+      })).json()
+    ).docs.length;
+    assert.strictEqual(secondCount, firstCount, 'restart must not duplicate the corpus');
+    assert.ok(b2.out().includes('already seeded'), 'second boot should log the skip');
+    await b2.kill();
+    b2 = null;
   } finally {
-    if (child && child.exitCode === null) child.kill('SIGTERM');
+    if (b1) await b1.kill();
+    if (b2) await b2.kill();
   }
 });
