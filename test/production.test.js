@@ -114,6 +114,24 @@ test('prod: chat endpoint is bearer-gated when RAGDESK_CHAT_TOKEN is set', async
   }
 });
 
+test('prod: CORS allowOrigin "*" returns the wildcard to every origin', async () => {
+  const { kb, server, port } = await startServer({ allowOrigin: '*' });
+  try {
+    for (const origin of ['https://a.example', 'https://b.example', 'null']) {
+      const res = await req(port, {
+        reqPath: '/api/chat',
+        method: 'OPTIONS',
+        headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' },
+      });
+      assert.strictEqual(res.status, 204);
+      assert.strictEqual(res.headers['access-control-allow-origin'], '*', `origin ${origin} should get the wildcard`);
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('prod: CORS reflects origin by default and honors RAGDESK_ALLOW_ORIGIN', async () => {
   const { kb, server, port } = await startServer(); // no allowOrigin -> reflect
   try {
