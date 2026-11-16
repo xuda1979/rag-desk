@@ -6,6 +6,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const http = require('node:http');
+const crypto = require('node:crypto');
 
 const { KnowledgeBase } = require('../src/lib/knowledge');
 const { buildApp } = require('../src/app');
@@ -1557,6 +1558,84 @@ test('/api/chat body is exactly the engine answer contract: full-payload lock', 
     assert.ok(hit.body.answer.startsWith('以下是知识库中与您问题最相关的原文片段：'));
     assert.ok(hit.body.citations[0].excerpt.length > 0, 'a hit must carry a populated excerpt');
     assert.ok(hit.body.answer.includes(hit.body.citations[0].excerpt), 'answer embeds the cited excerpt');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
+test('/api/admin/docs rows carry sha256, status and mime; detail chunks expose exactly id/chunk_idx/body', async () => {
+  const { kb, server, port } = await startServer();
+  // listDocs returns d.* + chunk_count (a computed alias, not a column), so the
+  // full row shape on the wire is sha256/status/mime/updated_at plus the fields
+  // the admin table renders. sha256 is deterministic (SHA-256 of the fed bytes),
+  // status defaults to 'ready', and ingestBuffer without meta leaves mime NULL.
+  // The per-doc view selects the same d.* row WITHOUT chunk_count, so the two
+  // key sets on the wire differ in exactly that one key.
+  const text = '本诊所工作日 8:00 开门，周六日 9:00 开门。预约电话 010-1234。';
+  const buf = Buffer.from(text);
+  const sha = crypto.createHash('sha256').update(buf).digest('hex');
+  await kb.ingestBuffer('clinic.md', buf);
+  try {
+    const list = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(list.status, 200);
+    assert.strictEqual(list.body.docs.length, 1);
+    const row = list.body.docs[0];
+    assert.deepStrictEqual(Object.keys(row).sort(), [
+      'chunk_count',
+      'created_at',
+      'filename',
+      'id',
+      'kind',
+      'mime',
+      'sha256',
+      'size',
+      'status',
+      'updated_at',
+    ]);
+    assert.strictEqual(row.sha256, sha, 'sha256 must be the digest of the stored bytes');
+    assert.strictEqual(row.status, 'ready', 'status defaults to ready on ingest');
+    assert.strictEqual(row.mime, null, 'upload without meta carries no mime');
+    assert.strictEqual(row.updated_at, row.created_at, 'a fresh row sets both timestamps on insert');
+    assert.strictEqual(row.size, buf.length);
+    assert.strictEqual(row.filename, 'clinic.md');
+    assert.strictEqual(row.kind, 'markdown');
+
+    // the single-doc view: same doc row minus the computed chunk_count alias,
+    // plus chunks whose exact key set is id/chunk_idx/body (doc_id is
+    // deliberately absent from the wire; listChunks never selects it).
+    const detail = await get(`http://localhost:${port}/api/admin/docs/${row.id}`);
+    assert.strictEqual(detail.status, 200);
+    assert.deepStrictEqual(
+      Object.keys(detail.body.doc).sort(),
+      Object.keys(row).filter((k) => k !== 'chunk_count').sort()
+    );
+    const docRow = { ...row };
+    delete docRow.chunk_count;
+    assert.deepStrictEqual(detail.body.doc, docRow, 'detail doc row = list row minus the chunk_count alias');
+    assert.strictEqual(detail.body.doc.sha256, sha);
+    assert.strictEqual(detail.body.doc.status, 'ready');
+    assert.strictEqual(detail.body.doc.mime, null);
+
+    // chunk rows: exactly three keys, ascending chunk_idx, body re-joins to the
+    // source text byte-for-byte; detail chunk count agrees with the list alias
+    assert.ok(Array.isArray(detail.body.chunks));
+    assert.ok(detail.body.chunks.length >= 1, 'the text must produce chunks');
+    assert.strictEqual(row.chunk_count, detail.body.chunks.length, 'list aggregation must match the detail view');
+    const indexes = detail.body.chunks.map((c) => c.chunk_idx);
+    assert.deepStrictEqual(indexes, [...indexes].sort((a, b) => a - b), 'chunk_idx must be ascending');
+    for (const c of detail.body.chunks) {
+      assert.deepStrictEqual(Object.keys(c).sort(), ['body', 'chunk_idx', 'id']);
+      assert.strictEqual(typeof c.id, 'number');
+      assert.strictEqual(typeof c.chunk_idx, 'number');
+      assert.ok(c.chunk_idx >= 1, 'chunk_idx is 1-based');
+      assert.strictEqual(typeof c.body, 'string');
+    }
+    assert.strictEqual(
+      detail.body.chunks.map((c) => c.body).join(''),
+      text,
+      'concatenated chunk bodies must reconstruct the ingested text exactly'
+    );
   } finally {
     server.close();
     kb.close();
