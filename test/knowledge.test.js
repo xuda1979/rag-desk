@@ -14,6 +14,18 @@ function tempDb() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ragdesk-test-')), 'test.db');
 }
 
+test('excerptFrom: no-anchor fallback heads the body or returns it whole', () => {
+  const kb = new KnowledgeBase(tempDb());
+  const long = '疫苗接种时间每周二、周四、周六上午。'.repeat(5);
+  const cut = kb.excerptFrom(long, '完全不存在', 60);
+  assert.ok(cut.startsWith('疫苗接种时间'), 'fallback keeps the leading slice');
+  assert.ok(cut.endsWith('…'), 'long body gets an ellipsis');
+  assert.ok(cut.length <= 61, `head-cut should respect width, got length ${cut.length}`);
+  assert.strictEqual(kb.excerptFrom('太短，没有匹配。', '完全不存在', 60), '太短，没有匹配。', 'short body returns whole');
+  assert.strictEqual(kb.excerptFrom('   ', 'x'), '', 'blank body yields empty string');
+  kb.close();
+});
+
 test('chunker: splits long text into overlapping windows with paragraph packing', () => {
   const long = Array.from({ length: 60 }, (_, i) => `第${i}句内容。`).join('');
   const chunks = chunkText(long + '\n\n' + '短段。');

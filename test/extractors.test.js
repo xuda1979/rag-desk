@@ -3,7 +3,10 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { parseCsv, textFromBuffer, fileKind } = require('../src/lib/extractors');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const { parseCsv, textFromBuffer, fileKind, extractPdf } = require('../src/lib/extractors');
 
 test('parseCsv: handles escaped quotes per RFC-4180', () => {
   assert.deepStrictEqual(parseCsv('a,"b""c",d\n'), [['a', 'b"c', 'd']]);
@@ -56,4 +59,15 @@ test('fileKind: maps known extensions case-insensitively, null otherwise', () =>
   assert.strictEqual(fileKind('a.txt'), 'text');
   assert.strictEqual(fileKind('a.xyz'), null);
   assert.strictEqual(fileKind('noext'), null);
+});
+
+test('extractPdf extracts CJK text from the committed PDF fixture', async () => {
+  const pdf = path.join(__dirname, '..', 'fixtures', 'corpus', 'clinic-guide.pdf');
+  assert.ok(fs.existsSync(pdf), 'PDF fixture should be committed');
+  const text = await extractPdf(fs.readFileSync(pdf));
+  assert.ok(text.length > 100, `expected a meaningful extraction, got length ${text.length}`);
+  assert.match(text, /诊所预约须知/);
+  assert.match(text, /预约方式/);
+  // glyph-hole runs and page markers are scrubbed, not left as raw control chars
+  assert.doesNotMatch(text, /[\u0000\uFFFD]/);
 });
