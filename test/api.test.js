@@ -112,6 +112,48 @@ test('server-side: /api/health reports offline engine', async () => {
   assert.strictEqual(res.body.ok, true);
   assert.deepStrictEqual(res.body.mode, 'offline');
   assert.strictEqual(res.body.llmEnabled, false);
+  assert.strictEqual(res.body.engine.fts, true, 'FTS5 backend advertised');
+  assert.strictEqual(res.body.engine.bm25, true, 'BM25 ranking advertised');
+  assert.strictEqual(res.body.engine.embedding, false, 'no embeddings in offline mode');
+  assert.strictEqual(res.body.engine.llm, false, 'no LLM in offline mode');
+  assert.match(res.body.engine.tokenizer, /bigram-cjk/, 'tokenizer described');
+  assert.deepStrictEqual(res.body.domains, ['legal', 'medical', 'procurement', 'general']);
+  server.close();
+  kb.close();
+});
+
+test('server-side: oversized JSON request body maps to 413 JSON error, not HTML', async () => {
+  const { kb, server, port } = await startServer();
+  const huge = 'x'.repeat(2 * 1024 * 1024 + 100);
+  const big = JSON.stringify({ query: huge, domain: 'legal' });
+  const res = await new Promise((resolve, reject) => {
+    const u = new URL(`http://localhost:${port}/api/chat`);
+    const req = http.request(
+      {
+        host: u.hostname,
+        port: u.port,
+        path: u.pathname,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(big) },
+      },
+      (resp) => {
+        let out = '';
+        resp.on('data', (c) => (out += c));
+        resp.on('end', () => {
+          try {
+            resolve({ status: resp.statusCode, body: JSON.parse(out) });
+          } catch (_) {
+            reject(new Error(`non-JSON body: ${out.slice(0, 80)}`));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(big);
+    req.end();
+  });
+  assert.strictEqual(res.status, 413, 'entity.too.large maps to 413');
+  assert.match(res.body.error, /request body too large/);
   server.close();
   kb.close();
 });
