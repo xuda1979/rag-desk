@@ -57,6 +57,7 @@ function tokenize(text) {
 /** Tokenize a CJK run into overlapping n-grams (default bigrams). */
 function ngrams(cjkRun, n = 2) {
   const out = [];
+  if (!cjkRun) return out;
   if (cjkRun.length < n) {
     out.push(cjkRun);
     return out;
