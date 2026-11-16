@@ -130,3 +130,17 @@ test('LLM optional path stays OFF by default; mock summarizer works', async () =
   assert.ok(ans.answer.length > 0);
   kb.close();
 });
+
+test('punctuation/noise queries never throw and still match (FTS-safe)', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  await kb.ingestBuffer('p.md', Buffer.from('合同纠纷在被告住所地人民法院起诉，诉讼时效三年。客服电话 400-123-4567。'));
+  // quotes / question marks / parens are tokenizer delimiters, not MATCH syntax
+  const hitA = kb.searchRaw('"合同纠纷"').chunks;
+  assert.ok(hitA.length > 0, 'quoted cjk query should still hit');
+  assert.strictEqual(hitA[0].filename, 'p.md');
+  const hitB = kb.searchRaw('截止时间???').chunks; // trailing punctuation stripped
+  assert.ok(Array.isArray(hitB));
+  const noise = kb.searchRaw('***').chunks; // all delimiters -> empty query, no throw
+  assert.deepStrictEqual(noise, []);
+  kb.close();
+});
