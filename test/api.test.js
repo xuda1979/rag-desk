@@ -261,6 +261,7 @@ test('admin chunk listing: /api/admin/docs/:id returns chunks (view index)', asy
 
   const miss = await get(`http://localhost:${port}/api/admin/docs/9999`);
   assert.strictEqual(miss.status, 404);
+  assert.strictEqual(miss.body.error, 'not found', 'missing doc GET must be a JSON 404 with the stable body');
 
   const res = await get(`http://localhost:${port}/api/admin/docs/${doc.id}`);
   assert.strictEqual(res.status, 200);
@@ -671,6 +672,7 @@ test('DELETE of a missing document returns 404', async () => {
       .end();
   });
   assert.strictEqual(res.status, 404);
+  assert.strictEqual(res.body.error, 'not found', 'missing doc DELETE must be a JSON 404 with the stable body');
   server.close();
   kb.close();
 });
