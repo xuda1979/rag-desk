@@ -194,6 +194,24 @@ test('mockSummarizer picks the first sentence longer than 8 chars', async () => 
   assert.ok(out.includes('模拟 LLM 摘要'));
 });
 
+test('retrieval honors explicit limits; answer caps citations by limit', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  for (let i = 1; i <= 6; i++) {
+    await kb.ingestBuffer(`d${i}.md`, Buffer.from(`咨询费收取规则第${i}条：按小时计费。`));
+  }
+  assert.strictEqual(kb.searchRaw('咨询费', 5).chunks.length, 5, 'limit 5 caps at 5');
+  assert.strictEqual(kb.searchRaw('咨询费', 1).chunks.length, 1, 'limit 1 returns 1');
+  assert.strictEqual(kb.searchRaw('咨询费', 0).chunks.length, 0, 'limit 0 returns none');
+  assert.strictEqual(kb.searchRaw('咨询费', 10).chunks.length, 6, 'larger limit returns all');
+  const ret = await kb.retrieve('咨询费', 2);
+  assert.strictEqual(ret.chunks.length, 2, 'retrieve passes limit through');
+  const ans = kb.answer('咨询费', { limit: 2 });
+  assert.ok(ans.top, 'top citation present');
+  assert.strictEqual(ans.citations.length, 2, 'answer caps citations by limit');
+  assert.strictEqual(kb.answer('咨询费').citations.length, 3, 'default limit is 3');
+  kb.close();
+});
+
 test('UTF-8 BOM in md/txt files is stripped during chunking (Windows/Excel exports)', async () => {
   const kb = new KnowledgeBase(tempDb());
   const bom = Buffer.from('EFBBBF', 'hex');
