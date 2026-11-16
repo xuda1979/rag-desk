@@ -354,6 +354,54 @@ test('admin upload endpoint reports per-file results for a mixed batch', async (
   kb.close();
 });
 
+test('admin upload keeps a UTF-8 Chinese filename from multipart to docs list and chat citation', async () => {
+  const { kb, server, port } = await startServer();
+  // Chinese-language product: multer must hand the UTF-8 originalname through to
+  // storage and back onto the wire without mojibake, in the upload result, the
+  // admin docs list, and the chat citation the frontends render.
+  const boundary = '----rd-utf8';
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="诊所公告.md"\r\nContent-Type: text/markdown\r\n\r\n诊所公告：本周五劳动节放假一天，门诊时间调整为上午八点到十一点，请提前预约。\r\n`
+    ),
+    Buffer.from(`--${boundary}--\r\n`),
+  ]);
+  try {
+    const res = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/admin/upload',
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+        }
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.results[0].filename, '诊所公告.md', 'upload result keeps the UTF-8 filename');
+    assert.strictEqual(res.body.results[0].action, 'indexed');
+    assert.strictEqual(res.body.results[0].docId, 1);
+
+    const docs = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(docs.body.docs[0].filename, '诊所公告.md', 'docs list shows the UTF-8 filename');
+
+    const ans = await post(`http://localhost:${port}/api/chat`, { query: '诊所放假怎么安排' });
+    assert.strictEqual(ans.body.top.document, '诊所公告.md', 'chat citation carries the UTF-8 filename');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin upload endpoint reports duplicate when the same bytes are re-uploaded', async () => {
   const { kb, server, port } = await startServer();
   // admin.js renders action==='duplicate' as 已存在跳过; the dedup keys on the
