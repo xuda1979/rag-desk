@@ -149,6 +149,51 @@ test('punctuation/noise queries never throw and still match (FTS-safe)', async (
   kb.close();
 });
 
+test('answerWithLlm on empty retrieval returns domain fallback, never calls summarizer', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  let calls = 0;
+  const spy = async () => { calls++; return 'SHOULD-NOT-HAPPEN'; };
+  const ans = await kb.answerWithLlm('完全不存在的问题', { domain: 'legal', summarizer: spy });
+  assert.strictEqual(ans.mode, 'llm');
+  assert.strictEqual(ans.llm, true);
+  assert.strictEqual(ans.domain, 'legal');
+  assert.strictEqual(ans.confidence, 0);
+  assert.strictEqual(ans.answer, '抱歉，我在知识库中暂未找到与您问题直接相关的内容。您可以换个问法，或咨询前台获取人工帮助。');
+  assert.deepStrictEqual(ans.citations, []);
+  assert.strictEqual(calls, 0, 'summarizer must not run with no retrieved context');
+  kb.close();
+});
+
+test('answerWithLlm passes query/context/systemPrompt and uses summarizer text verbatim', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  await kb.ingestBuffer('l.md', Buffer.from('合同纠纷在被告住所地人民法院起诉，诉讼时效三年。'));
+  let received = null;
+  const ans = await kb.answerWithLlm('合同纠纷在哪里起诉', {
+    domain: 'legal',
+    summarizer: async (args) => {
+      received = args;
+      return 'CUSTOM-SUMMARY';
+    },
+  });
+  assert.strictEqual(ans.mode, 'llm');
+  assert.strictEqual(ans.llm, true);
+  assert.strictEqual(ans.domain, 'legal');
+  assert.strictEqual(ans.answer, 'CUSTOM-SUMMARY');
+  assert.deepStrictEqual(Object.keys(received).sort(), ['context', 'query', 'systemPrompt']);
+  assert.strictEqual(received.query, '合同纠纷在哪里起诉');
+  assert.ok(received.context.length > 0, 'context should contain retrieved chunk body');
+  assert.ok(received.systemPrompt.includes('律师事务所'), 'systemPrompt should come from the domain preset');
+  assert.strictEqual(ans.citations.length, 1);
+  kb.close();
+});
+
+test('mockSummarizer picks the first sentence longer than 8 chars', async () => {
+  const { mockSummarizer } = require('../src/lib/knowledge');
+  const out = await mockSummarizer({ query: 'x', context: '短。\n这是一句超过八个字的有效句子内容。' });
+  assert.ok(out.includes('这是一句超过八个字的有效句子内容。'));
+  assert.ok(out.includes('模拟 LLM 摘要'));
+});
+
 test('UTF-8 BOM in md/txt files is stripped during chunking (Windows/Excel exports)', async () => {
   const kb = new KnowledgeBase(tempDb());
   const bom = Buffer.from('EFBBBF', 'hex');
