@@ -215,6 +215,45 @@ test('admin upload endpoint rejects an empty file (no 0-chunk docs)', async () =
   kb.close();
 });
 
+test('admin upload endpoint rejects an unsupported file type', async () => {
+  const { kb, server, port } = await startServer();
+  const boundary = '----rd-type';
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="malware.exe"\r\nContent-Type: application/octet-stream\r\n\r\n`
+    ),
+    Buffer.from('MZ this is not a document'),
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  const res = await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: 'localhost',
+        port,
+        path: '/api/admin/upload',
+        method: 'POST',
+        headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      },
+      (r) => {
+        let out = '';
+        r.on('data', (c) => (out += c));
+        r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.results[0].action, 'error');
+  assert.match(res.body.results[0].error, /不支持的文件类型/);
+  // nothing was persisted
+  const docs = await get(`http://localhost:${port}/api/admin/docs`);
+  assert.strictEqual(docs.body.docs.length, 0);
+  server.close();
+  kb.close();
+});
+
 test('admin upload endpoint rejects more than 20 files with a 400', async () => {
   const { kb, server, port } = await startServer();
   const boundary = '----rd-many';
