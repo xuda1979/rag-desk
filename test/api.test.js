@@ -628,6 +628,43 @@ test('DELETE of an existing document removes it from list and search', async () 
   kb.close();
 });
 
+test('deleting a doc keeps its query-log history; the top-doc join degrades to null', async () => {
+  const { kb, server, port } = await startServer();
+  // queries_log.top_doc_id has no FK, so DELETE must keep the audit trail; the
+  // LEFT JOIN then yields a null top_filename the admin table renders as '-'.
+  try {
+    await kb.ingestBuffer('vet.md', Buffer.from('疫苗接种时间每周二、周四、周六上午。'));
+    const docId = kb.getAllDocs()[0].id;
+    await post(`http://localhost:${port}/api/chat`, { query: '疫苗接种时间' });
+
+    const before = await get(`http://localhost:${port}/api/admin/logs`);
+    assert.strictEqual(before.body.logs.length, 1, 'query logged before deletion');
+    assert.strictEqual(before.body.logs[0].top_doc_id, docId);
+    assert.strictEqual(before.body.logs[0].top_filename, 'vet.md');
+
+    const del = await new Promise((resolve, reject) => {
+      http
+        .request({ host: 'localhost', port, path: `/api/admin/docs/${docId}`, method: 'DELETE' }, (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+        })
+        .on('error', reject)
+        .end();
+    });
+    assert.strictEqual(del.status, 200);
+
+    const after = await get(`http://localhost:${port}/api/admin/logs`);
+    assert.strictEqual(after.body.logs.length, 1, 'audit trail survives the doc delete');
+    assert.strictEqual(after.body.logs[0].query, '疫苗接种时间');
+    assert.strictEqual(after.body.logs[0].top_doc_id, docId, 'dangling id is kept, not rewritten');
+    assert.strictEqual(after.body.logs[0].top_filename, null, 'LEFT JOIN yields null so admin.js renders "-"');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/chat tolerates a malformed limit (defaults instead of 500)', async () => {
   const { kb, server, port } = await startServer();
   const ok = await post(`http://localhost:${port}/api/chat`, { query: 'xyz', limit: 'abc' });
