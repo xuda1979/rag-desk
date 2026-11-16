@@ -914,6 +914,25 @@ test('/api/admin/stats reports total and matched query counts', async () => {
   kb.close();
 });
 
+test('/api/admin/stats counts a miss toward total but not with_answer', async () => {
+  const { kb, server, port } = await startServer();
+  // admin.js computes 命中率 = with_answer/total client-side; a no-hit query
+  // must still count toward the query total while leaving with_answer at 0,
+  // otherwise a miss would drag the hit rate toward 100%.
+  try {
+    const miss = await post(`http://localhost:${port}/api/chat`, { query: 'qqq zzz xxx' });
+    assert.strictEqual(miss.status, 200);
+    assert.strictEqual(miss.body.citations.length, 0, 'probe must actually miss');
+    const stats = await get(`http://localhost:${port}/api/admin/stats`);
+    assert.strictEqual(stats.status, 200);
+    assert.strictEqual(stats.body.stats.total, 1, 'a miss is still a logged query');
+    assert.strictEqual(stats.body.stats.with_answer, 0, 'a miss must not count as answered');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('CORS headers ride on actual responses, not just preflight', async () => {
   const { kb, server, port } = await startServer();
   // Cross-origin widgets depend on the real GET/POST responses carrying CORS
