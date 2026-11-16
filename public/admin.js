@@ -139,7 +139,12 @@
         return;
       }
       uploadResult.textContent = (data.results || [])
-        .map((r) => `${r.filename}: ${r.action === 'indexed' ? `已索引（${r.chunks} 分块）` : r.action}`)
+        .map((r) => {
+          if (r.action === 'indexed') return `${r.filename}: 已索引（${r.chunks} 分块）`;
+          if (r.action === 'duplicate') return `${r.filename}: 内容已存在，跳过`;
+          if (r.action === 'error') return `${r.filename}: 失败 — ${r.error || '未知错误'}`;
+          return `${r.filename}: ${r.action}`;
+        })
         .join('；');
       loadDocs();
     } catch (e) {
