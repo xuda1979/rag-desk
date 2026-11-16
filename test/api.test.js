@@ -1718,3 +1718,71 @@ test('/api/admin/logs body is { logs, stats } and each row carries the full quer
     kb.close();
   }
 });
+
+test('admin upload reports exact per-action result shapes in one batch: indexed/duplicate/error key sets in part order', async () => {
+  const { kb, server, port } = await startServer();
+  // admin.js renders each result by r.action: indexed reads r.chunks, duplicate
+  // renders from filename alone, error reads r.error. Existing per-field tests
+  // never pin the exact key set, so an added/renamed field (e.g. duplicate
+  // carrying chunks, or error leaking a docId) would slip through. Lock all
+  // three shapes in one batch, the part-order equivalence of the results array,
+  // and HTTP 200 for a partially failing batch.
+  const contents = 'nullam_tempus_duopoints 律师事务所收费标准按小时计费，先签合同后服务。';
+  const boundary = '----rd-shapes';
+  const body = Buffer.from(
+    [
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="fee.md"\r\nContent-Type: text/markdown\r\n\r\n${contents}\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="fee.md"\r\nContent-Type: text/markdown\r\n\r\n${contents}\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="bad.xyz"\r\nContent-Type: application/octet-stream\r\n\r\nnope\r\n`,
+      `--${boundary}--\r\n`,
+    ].join('')
+  );
+  try {
+    const res = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/admin/upload',
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+        }
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+    assert.strictEqual(res.status, 200, 'a partially failing batch still returns 200 with per-file results');
+    assert.strictEqual(res.body.results.length, 3, 'one result per multipart part');
+
+    // indexed: exactly { filename, action, docId, chunks }
+    assert.deepStrictEqual(Object.keys(res.body.results[0]).sort(), ['action', 'chunks', 'docId', 'filename']);
+    assert.deepStrictEqual(res.body.results[0], { filename: 'fee.md', action: 'indexed', docId: 1, chunks: 1 });
+
+    // duplicate: exactly { filename, action, docId } — no chunks, no error
+    assert.deepStrictEqual(Object.keys(res.body.results[1]).sort(), ['action', 'docId', 'filename']);
+    assert.deepStrictEqual(
+      res.body.results[1],
+      { filename: 'fee.md', action: 'duplicate', docId: 1 },
+      'same-batch re-upload must report duplicate and point at the first doc id'
+    );
+
+    // error: exactly { filename, action, error } — no docId, no chunks
+    assert.deepStrictEqual(Object.keys(res.body.results[2]).sort(), ['action', 'error', 'filename']);
+    assert.deepStrictEqual(
+      res.body.results[2],
+      { filename: 'bad.xyz', action: 'error', error: '不支持的文件类型: bad.xyz' }
+    );
+
+    const docs = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(docs.body.docs.length, 1, 'only the indexable file persists across the three-part batch');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
