@@ -328,3 +328,38 @@ test('settings persist across KnowledgeBase close/reopen; defaults when missing'
   assert.strictEqual(kb2.getSetting('nope', 'dflt'), 'dflt', 'missing key returns the default');
   kb2.close();
 });
+
+test('engineInfo advertises the offline FTS5+BM25 engine and its db path', () => {
+  const kb = new KnowledgeBase(tempDb());
+  const info = kb.engineInfo();
+  assert.strictEqual(info.fts, true);
+  assert.strictEqual(info.bm25, true);
+  assert.strictEqual(info.embedding, false, 'offline mode has no embeddings');
+  assert.strictEqual(info.llm, false, 'offline mode has no LLM');
+  assert.match(info.tokenizer, /bigram-cjk/);
+  assert.strictEqual(info.storage, kb.storage.dbPath, 'engine reports the live db path');
+  kb.close();
+});
+
+test('getDoc returns null for a missing id and the full row for an existing one', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  assert.strictEqual(kb.getDoc(9999), null);
+  await kb.ingestBuffer('d.md', Buffer.from('咨询费按小时计费，合同纠纷在被告住所地人民法院起诉。'));
+  const doc = kb.getDoc(kb.getAllDocs()[0].id);
+  assert.strictEqual(doc.filename, 'd.md');
+  assert.strictEqual(doc.kind, 'markdown');
+  assert.strictEqual(kb.getAllDocs()[0].chunk_count, 1, 'list view carries a chunk count');
+  kb.close();
+});
+
+test('storage getChunk returns chunk body/filename and chunkCount tallies per doc', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  await kb.ingestBuffer('c.md', Buffer.from('疫苗接种时间每周二、周四、周六上午。'));
+  const doc = kb.getAllDocs()[0];
+  assert.strictEqual(kb.storage.chunkCount(doc.id), 1);
+  const chunk = kb.storage.getChunk(kb.storage.listChunks(doc.id)[0].id);
+  assert.strictEqual(chunk.filename, 'c.md');
+  assert.strictEqual(chunk.chunk_idx, 1);
+  assert.match(chunk.body, /疫苗接种时间/);
+  kb.close();
+});
