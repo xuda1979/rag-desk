@@ -302,6 +302,70 @@ test('admin upload endpoint reports per-file results for a mixed batch', async (
   kb.close();
 });
 
+test('admin upload endpoint ingests PDF/DOCX/CSV fixtures end-to-end', async () => {
+  const { kb, server, port } = await startServer();
+  const boundary = '----rd-ext';
+  const files = [
+    ['law-services.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    ['clinic-guide.pdf', 'application/pdf'],
+    ['faq-transfer.csv', 'text/csv'],
+  ];
+  const parts = files.map(([name, mime]) => {
+    const buf = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'corpus', name));
+    return Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="${name}"\r\nContent-Type: ${mime}\r\n\r\n`
+      ),
+      buf,
+      Buffer.from('\r\n'),
+    ]);
+  });
+  const body = Buffer.concat([...parts, Buffer.from(`--${boundary}--\r\n`)]);
+  const res = await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: 'localhost',
+        port,
+        path: '/api/admin/upload',
+        method: 'POST',
+        headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length },
+      },
+      (r) => {
+        let out = '';
+        r.on('data', (c) => (out += c));
+        r.on('end', () => {
+          try {
+            resolve({ status: r.statusCode, body: JSON.parse(out) });
+          } catch (_) {
+            reject(new Error(`non-JSON upload response: ${out.slice(0, 80)}`));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.results.length, 3, 'one result per uploaded file');
+  for (const r of res.body.results) {
+    assert.strictEqual(r.action, 'indexed', `${r.filename} should index`);
+  }
+
+  const docs = await get(`http://localhost:${port}/api/admin/docs`);
+  assert.strictEqual(docs.body.docs.length, 3, 'all three formats persist to the admin list');
+
+  // each upload is retrievable by a query that only appears in that file
+  const csv = await post(`http://localhost:${port}/api/chat`, { query: '工伤认定要什么材料' });
+  assert.strictEqual(csv.body.top.document, 'faq-transfer.csv', 'CSV FAQ retrievable after upload');
+  const docx = await post(`http://localhost:${port}/api/chat`, { query: '常年法律顾问' });
+  assert.strictEqual(docx.body.top.document, 'law-services.docx', 'DOCX retrievable after upload');
+  const pdf = await post(`http://localhost:${port}/api/chat`, { query: '预约方式' });
+  assert.strictEqual(pdf.body.top.document, 'clinic-guide.pdf', 'PDF retrievable after upload');
+  server.close();
+  kb.close();
+});
+
 test('admin upload endpoint rejects an unsupported file type', async () => {
   const { kb, server, port } = await startServer();
   const boundary = '----rd-type';
