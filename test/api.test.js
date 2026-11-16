@@ -298,6 +298,9 @@ test('widget script supports RAGDESK_CHAT_TOKEN via data-token', async () => {
   assert.strictEqual(res.status, 200);
   assert.match(res.body, /getAttribute\('data-token'\)/);
   assert.match(res.body, /headers\.Authorization = 'Bearer ' \+ TOKEN/);
+  // non-2xx (e.g. missing/invalid token -> 401) surfaces the server error
+  // instead of being silently shown as "（暂无回答）".
+  assert.match(res.body, /if \(!r\.ok\) throw new Error\(data\.error/);
   server.close();
   kb.close();
 });

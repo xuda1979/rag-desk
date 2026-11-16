@@ -92,7 +92,12 @@
       headers: headers,
       body: JSON.stringify({ query: q, domain: DOMAIN }),
     })
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        return r.json().then(function (data) {
+          if (!r.ok) throw new Error(data.error || ('请求失败（HTTP ' + r.status + '）'));
+          return data;
+        });
+      })
       .then(function (data) {
         var ans = esc(data.answer || '（暂无回答）').replace(/\n/g, '<br>');
         var cites = (data.citations || []).slice(0, 2)
