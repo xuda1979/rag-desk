@@ -958,6 +958,31 @@ test('widget script supports RAGDESK_CHAT_TOKEN via data-token', async () => {
   kb.close();
 });
 
+test('widget script wiring: defaults, domain passthrough and chat body shape', async () => {
+  const { kb, server, port } = await startServer();
+  try {
+    const res = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(res.status, 200);
+    // host page controls endpoint/domain/token via data-* attributes; a missing
+    // attribute must fall back (data-api -> /api/chat, data-domain -> general,
+    // data-token -> '') rather than break the embed.
+    assert.match(res.body, /script\.getAttribute\('data-api'\) \|\| '\/api\/chat'/);
+    assert.match(res.body, /script\.getAttribute\('data-domain'\) \|\| 'general'/);
+    assert.match(res.body, /script\.getAttribute\('data-token'\) \|\| ''/);
+    // the selected domain is forwarded with every question so doc presets apply;
+    // body shape must match what /api/chat validates server-side.
+    assert.match(res.body, /JSON\.stringify\(\{ query: q, domain: DOMAIN \}\)/);
+    // widget renders answer/citations document+paragraph/confidence from the
+    // chat payload (the fields both demo.js and index.html depend on).
+    assert.ok(res.body.includes("data.answer || '（暂无回答）'"));
+    assert.ok(res.body.includes("esc(c.document) + ' §' + c.paragraph"));
+    assert.ok(res.body.includes("Math.round((data.confidence || 0) * 100) + '%</span>'"));
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('static pages served', async () => {
   const { kb, server, port } = await startServer();
   const idx = await get(`http://localhost:${port}/`);
