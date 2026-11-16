@@ -260,6 +260,43 @@ test('prod: thrown engine errors become stable JSON 500s, not HTML stack traces'
   }
 });
 
+test('prod: unknown API routes return JSON 404, never the Express HTML page', async () => {
+  const { kb, server, port } = await startServer();
+  try {
+    for (const reqPath of ['/api/nope', '/api/admin/nope', '/api/chat/nope']) {
+      const res = await req(port, { reqPath });
+      assert.strictEqual(res.status, 404);
+      assert.match(res.headers['content-type'], /application\/json/);
+      assert.deepStrictEqual(res.body, { error: 'not found' });
+    }
+    // widget/site HTML stays untouched (static routes still serve 200)
+    const staticRes = await req(port, { reqPath: '/widget.js' });
+    assert.strictEqual(staticRes.status, 200);
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
+test('prod: malformed JSON body becomes a stable JSON 400, not HTML', async () => {
+  const { kb, server, port } = await startServer();
+  try {
+    const res = await req(port, {
+      method: 'POST',
+      reqPath: '/api/chat',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{bad json',
+    });
+    assert.strictEqual(res.status, 400);
+    assert.match(res.headers['content-type'], /application\/json/);
+    assert.strictEqual(typeof res.body.error, 'string');
+    assert.ok(res.body.error.length > 0);
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('prod: server.js boot seeds a fresh DB, gates admin, answers chat, and skips re-seed on later boots', async () => {
   const bootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rd-boot-'));
   const dbPath = path.join(bootDir, 'boot.db');

@@ -159,6 +159,10 @@ function buildApp(kb, opts = {}) {
     });
   });
 
+  // Unknown API paths get a JSON 404 so client-side JSON.parse never hits the
+  // Express HTML error page.
+  app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
+
   // ---------------------------------------------------------------- pages
   app.use(express.static(path.join(ROOT, 'public')));
   app.get('/admin', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'admin.html')));
