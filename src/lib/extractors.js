@@ -5,7 +5,7 @@ const path = require('node:path');
 
 /** Parse CSV (RFC-4180-ish, handles embedded quotes/newlines) into rows. */
 function parseCsv(text) {
-  const src = String(text == null ? '' : text);
+  let src = String(text == null ? '' : text);
   if (src.charCodeAt(0) === 0xfeff) src = src.slice(1);
   const rows = [];
   let field = '';

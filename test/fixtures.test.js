@@ -77,3 +77,11 @@ test('parseCsv handles quoted fields', () => {
   const rows = parseCsv('问题,回答\n"这个,带逗号",答案\n');
   assert.strictEqual(rows[1][0], '这个,带逗号');
 });
+
+test('parseCsv strips a UTF-8 BOM', () => {
+  const bom = Buffer.from('EFBBBF', 'hex').toString('utf8'); // as Excel writes Chinese CSVs
+  const rows = parseCsv(bom + '问题,回答\n挂号需要带什么,带身份证\n');
+  assert.strictEqual(rows[0][0], '问题', 'BOM must not leak into the first field');
+  assert.strictEqual(rows[0][1], '回答');
+  assert.strictEqual(rows[1][0], '挂号需要带什么');
+});
