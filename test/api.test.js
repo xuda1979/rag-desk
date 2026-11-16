@@ -683,6 +683,32 @@ test('/api/admin/logs honors a valid limit (returns the requested row count)', a
   kb.close();
 });
 
+test('/api/admin/logs lists queries newest-first, matching the admin table render order', async () => {
+  const { kb, server, port } = await startServer();
+  // admin.js appends rows top-down from the wire array; the storage layer
+  // orders by q.id DESC, so a second query must appear before the first.
+  try {
+    await kb.ingestBuffer('clinic.md', Buffer.from('本诊所工作日 8:00 开门，预约电话 010-8888。'));
+    const queries = ['最早的查询', '中间的查询', '最新的查询'];
+    for (const q of queries) {
+      const chat = await post(`http://localhost:${port}/api/chat`, { query: q });
+      assert.strictEqual(chat.status, 200);
+    }
+    const logs = await get(`http://localhost:${port}/api/admin/logs`);
+    assert.strictEqual(logs.status, 200);
+    assert.deepStrictEqual(
+      logs.body.logs.map((l) => l.query),
+      [...queries].reverse(),
+      'newest query logs first so the admin table reads top-down newest-first'
+    );
+    const ids = logs.body.logs.map((l) => l.id);
+    assert.ok(ids.every((id, i) => i === 0 || ids[i - 1] > id), 'ids must strictly descend');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/admin/logs carries the top-doc filename join for answered queries', async () => {
   const { kb, server, port } = await startServer();
   // the admin table displays top_filename (admin.js); it comes from a LEFT
