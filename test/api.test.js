@@ -718,6 +718,45 @@ test('non-numeric doc id returns JSON 404, never a 500', async () => {
   kb.close();
 });
 
+test('wrong method on a known API path returns the stable JSON 404, not HTML', async () => {
+  const { kb, server, port } = await startServer();
+  try {
+    // Routes only register their own verb; any other verb must fall through to
+    // the /api catch-all so client-side JSON.parse never hits an HTML page.
+    const cases = [
+      { method: 'GET', path: '/api/chat' },
+      { method: 'PUT', path: '/api/chat' },
+      { method: 'POST', path: '/api/domains' },
+      { method: 'PATCH', path: '/api/health' },
+      { method: 'DELETE', path: '/api/admin/stats' },
+      { method: 'POST', path: '/api/admin/docs/1' },
+    ];
+    for (const c of cases) {
+      const res = await new Promise((resolve, reject) => {
+        const req = http.request(
+          { host: 'localhost', port, path: c.path, method: c.method },
+          (r) => {
+            let out = '';
+            r.on('data', (ch) => (out += ch));
+            r.on('end', () => resolve({ status: r.statusCode, body: out }));
+          }
+        );
+        req.on('error', reject);
+        req.end();
+      });
+      assert.strictEqual(res.status, 404, `${c.method} ${c.path} must 404`);
+      assert.deepStrictEqual(
+        JSON.parse(res.body),
+        { error: 'not found' },
+        `${c.method} ${c.path} must return the same JSON 404 body as an unknown path`
+      );
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('DELETE of an existing document removes it from list and search', async () => {
   const { kb, server, port } = await startServer();
   await kb.ingestBuffer('del.md', Buffer.from('疫苗接种时间每周二、周四、周六上午。'));
