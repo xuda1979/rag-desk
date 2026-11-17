@@ -333,6 +333,47 @@ test('server-side: a chat miss returns the selected domain\'s own fallback phras
   }
 });
 
+test('server-side: a chat HIT is phrased with the selected domain\'s own lead and footer on the wire', async () => {
+  const { kb, server, port } = await startServer();
+  // demo.js renders the answer verbatim on every chat request, so a hit under a
+  // domain page must carry THAT domain's lead/footer, not the general ones.
+  // Only the general (and legal lead) phrasing is pinned today; the medical and
+  // procurement lead/footer composition has zero wire locks.
+  try {
+    await kb.ingestBuffer('clinic.md', Buffer.from('本诊所工作日 8:00 开门，周六日 9:00 开门。预约电话 010-1234。'));
+    const leads = {
+      legal: '根据律所知识库，下面是一段与您问题直接相关的原文片段：',
+      medical: '根据诊所资料，以下是与您关心问题相关的原文内容：',
+      procurement: '根据发布的公告原文，相关要点如下：',
+    };
+    const footers = {
+      legal: '（以上回答基于律所公开资料整理，如有紧急法律问题请咨询执业律师。）',
+      medical: '（以上内容仅供参考，不能替代医生当面诊断。）',
+      procurement: '（公告信息以官方发布文件为准。）',
+    };
+    for (const [domain, lead] of Object.entries(leads)) {
+      const res = await post(`http://localhost:${port}/api/chat`, { query: '几点开门', domain });
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.domain, domain, 'selected domain must be echoed on the wire');
+      assert.ok(res.body.citations.length > 0, `${domain} hit must retrieve the ingested doc`);
+      assert.deepStrictEqual(
+        res.body,
+        kb.answer('几点开门', { domain, limit: 3 }),
+        'the route must forward the domain-phrased engine answer unchanged'
+      );
+      assert.ok(res.body.answer.startsWith(lead), `${domain} hit must open with its own lead, not the general one`);
+      assert.ok(
+        res.body.answer.includes(footers[domain]),
+        `${domain} hit must close with its own footer, not the general one`
+      );
+      assert.ok(res.body.answer.includes(res.body.citations[0].excerpt), 'answer embeds the cited excerpt');
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('server-side: /api/health reports the full offline engine payload', async () => {
   const { kb, server, port } = await startServer();
   try {
