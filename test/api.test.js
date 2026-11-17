@@ -2475,6 +2475,42 @@ test('admin.js token gate client-side: the token lives in localStorage under rag
   }
 });
 
+test('demo.js esc() null-coerces and maps all five HTML metacharacters; addMsg appends each bubble as a div and returns it for in-place patching', async () => {
+  const { kb, server, port } = await startServer();
+  // The demo's only defense against HTML injection from fetched answers and
+  // citations is its esc() helper — every field interpolated into innerHTML
+  // passes through it. Lock the implementation: null/undefined coerce to ''
+  // (never the string 'null') and all five characters the map covers must stay
+  // mapped to their named entities; dropping one would silently re-open the
+  // boundary. addMsg must build each bubble as a fresh div, append it into the
+  // chat area and return it so the caller can patch its innerHTML in place.
+  try {
+    const res = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(res.status, 200);
+    // null/undefined must render as '' not 'null', and the regex must cover the
+    // full metacharacter set (< > & " ') before the entity lookup
+    assert.ok(res.body.includes("String(s == null ? '' : s).replace(/[&<>\"']/g, (c) =>"), 'esc must null-coerce input and replace every HTML metacharacter');
+    // the entity map must pair each character with its named-entity target
+    // (the single-quote key is double-quoted in the source: "'": '&#39;')
+    assert.ok(res.body.includes("'&': '&amp;'"), 'esc must map & to &amp;');
+    assert.ok(res.body.includes("'<': '&lt;'"), 'esc must map < to &lt;');
+    assert.ok(res.body.includes("'>': '&gt;'"), 'esc must map > to &gt;');
+    assert.ok(res.body.includes("'\"': '&quot;'"), 'esc must map " to &quot;');
+    assert.ok(
+      res.body.includes('"\'": \'&#39;\''),
+      "esc must map ' to &#39; (with the double-quoted source key)"
+    );
+    // addMsg: a fresh div per bubble, innerHTML payload, appended and returned
+    assert.ok(res.body.includes("const el = document.createElement('div');"), 'addMsg must build each bubble as a fresh div');
+    assert.ok(res.body.includes('el.innerHTML = html;'), 'addMsg must set the bubble HTML from the escaped payload');
+    assert.ok(res.body.includes('chatEl.appendChild(el);'), 'addMsg must append the bubble into the chat area');
+    assert.ok(res.body.includes('return el;'), 'addMsg must return the bubble for in-place replacement');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js builds the domain <option>s and example chips via createElement/appendChild, clearing stale rows before each rebuild', async () => {
   const { kb, server, port } = await startServer();
   // The selection-preservation and chip-behavior tests lock fillSelect/renderExamples
