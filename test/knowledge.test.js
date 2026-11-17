@@ -52,6 +52,33 @@ test('excerptFrom: anchor path windows around the first query hit with ellipses'
   kb.close();
 });
 
+test('excerptFrom coerces null/undefined chunk bodies to an empty excerpt', () => {
+  const kb = new KnowledgeBase(tempDb());
+  assert.strictEqual(kb.excerptFrom(null, '某查询', 60), '', 'null body must not throw and yields no excerpt');
+  assert.strictEqual(kb.excerptFrom(undefined, '某查询', 60), '', 'undefined body must not throw and yields no excerpt');
+  assert.strictEqual(kb.excerptFrom(0, '某查询', 60), '', 'falsy non-string body coerces the same way');
+  assert.strictEqual(kb.excerptFrom('', '某查询', 60), '', 'empty string stays empty');
+  kb.close();
+});
+
+test('_extractText surfaces the unsupported-format error when textFromBuffer returns null', async () => {
+  const kb = new KnowledgeBase(tempDb());
+  // textFromBuffer returns null for unknown extensions, and the
+  // `t !== null` guard on the throw side is only reachable by calling
+  // _extractText directly (ingestBuffer pre-filters unsupported kinds).
+  await assert.rejects(
+    () => kb._extractText('junk.xyz', Buffer.from('whatever bytes')),
+    /不支持的文件格式: junk\.xyz/,
+    'an untokenizable extension must reject with the format error'
+  );
+  await assert.rejects(() => kb._extractText('noext', Buffer.from('x')), /不支持的文件格式: noext/);
+  // an empty filename carries no name to echo: the `|| '?'` fallback applies
+  await assert.rejects(() => kb._extractText('', Buffer.from('x')), /不支持的文件格式: \?/);
+  // the supported formats still return text through the same helper
+  assert.strictEqual(await kb._extractText('ok.txt', Buffer.from('挂号请带身份证。')), '挂号请带身份证。');
+  kb.close();
+});
+
 test('chunker: splits long text into overlapping windows with paragraph packing', () => {
   const long = Array.from({ length: 60 }, (_, i) => `第${i}句内容。`).join('');
   const chunks = chunkText(long + '\n\n' + '短段。');

@@ -109,3 +109,15 @@ test('confidenceScore: single hit caps at 1; gap between top-1 and top-2 lifts c
   assert.ok(confidenceScore({ score: 0 }, [{ score: 0 }, { score: 0 }]) >= 0.4, 'never below floor');
   assert.strictEqual(confidenceScore(null, []), 0, 'no chunks -> 0');
 });
+
+test('confidenceScore: small lone hit stays below the cap (0.5 + s1, no truncation)', () => {
+  assert.strictEqual(confidenceScore({ score: -0.2 }, [{ score: -0.2 }]), 0.7, '0.5 + 0.2 passes through');
+  assert.strictEqual(confidenceScore({ score: -0.5 }, [{ score: -0.5 }]), 1, '0.5 + 0.5 hits the cap exactly');
+});
+
+test('confidenceScore: a zero-score runner-up lets the top-1 gap max out (chunks[1].score || 0 falsy path)', () => {
+  const gapZero = confidenceScore({ score: -2 }, [{ score: -2 }, { score: 0 }]);
+  assert.ok(gapZero > 0.94 && gapZero < 0.96, `s2=0 -> gap=1 -> ~0.95, got ${gapZero}`);
+  const gapNull = confidenceScore({ score: -2 }, [{ score: -2 }, { score: null }]);
+  assert.ok(gapNull > 0.94 && gapNull < 0.96, `missing runner-up score coerces like zero, got ${gapNull}`);
+});
