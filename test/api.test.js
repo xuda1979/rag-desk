@@ -5091,3 +5091,30 @@ test('upload mime persists into the docs row via the wire (multipart Content-Typ
     kb.close();
   }
 });
+
+test('widget.js fallback route: hidden static file still answers JSON 404 with a JS content-type, restored file serves 200', async () => {
+  const widgetPath = path.join(__dirname, '..', 'public', 'widget.js');
+  const hidePath = widgetPath + '.route-test.hid';
+  fs.renameSync(widgetPath, hidePath);
+  const { kb, server, port } = await startServer();
+  try {
+    // static middleware falls through to the explicit /widget.js route whose
+    // sendFile ENOENT bubbles into the central JSON error handler
+    const hidden = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(hidden.status, 404);
+    assert.match(hidden.headers['content-type'], /application\/javascript/, 'res.type() must persist even when sendFile fails');
+    assert.match(hidden.body.error, /ENOENT[^]*widget\.js/);
+  } finally {
+    server.close();
+    kb.close();
+    fs.renameSync(hidePath, widgetPath);
+  }
+  const { kb: kb2, server: server2, port: port2 } = await startServer();
+  try {
+    const restored = await get(`http://localhost:${port2}/widget.js`);
+    assert.strictEqual(restored.status, 200, 'restoring the file must return the statically-served 200');
+  } finally {
+    server2.close();
+    kb2.close();
+  }
+});
