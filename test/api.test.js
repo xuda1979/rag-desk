@@ -2032,6 +2032,32 @@ test('admin.js renders the wire-locked admin fields: stats arithmetic, logs "-" 
   }
 });
 
+test('demo page badges and subtitle keep claiming the offline engine the /api/health payload reports', async () => {
+  const { kb, server, port } = await startServer();
+  // The landing page advertises the offline architecture (LLM 关闭 / Embedding
+  // 关闭 / SQLite FTS5 + BM25). /api/health reports the same facts as booleans;
+  // a rewire that flips the engine state (e.g. an on-by-default LLM mode) must
+  // not leave the page claiming the old offline stance.
+  try {
+    const idx = await get(`http://localhost:${port}/`);
+    assert.strictEqual(idx.status, 200);
+    assert.ok(idx.body.includes('<p class="subtitle">垂直行业 RAG 客服壳 · 离线检索问答演示（无外部 LLM）</p>'), 'subtitle must keep the offline-architecture claim');
+    assert.ok(idx.body.includes('<span class="badge badge-off">LLM 关闭</span>'), 'badge must advertise LLM off');
+    assert.ok(idx.body.includes('<span class="badge badge-off">Embedding 关闭</span>'), 'badge must advertise embedding off');
+    assert.ok(idx.body.includes('<span class="badge badge-on">SQLite FTS5 + BM25</span>'), 'badge must advertise SQLite FTS5 + BM25 as on');
+
+    const health = await get(`http://localhost:${port}/api/health`);
+    assert.strictEqual(health.status, 200);
+    assert.strictEqual(health.body.engine.llm, false, 'engine must report LLM off for the badge claim to hold');
+    assert.strictEqual(health.body.engine.embedding, false, 'engine must report embedding off for the badge claim to hold');
+    assert.strictEqual(health.body.engine.fts, true, 'engine must report FTS on for the badge claim to hold');
+    assert.strictEqual(health.body.mode, 'offline', 'engine must report offline mode for the subtitle claim to hold');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('static pages served', async () => {
   const { kb, server, port } = await startServer();
   const idx = await get(`http://localhost:${port}/`);
