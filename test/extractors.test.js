@@ -127,6 +127,26 @@ test('extractPdf joins an array-shaped getText result (pdf-parse output normaliz
   }
 });
 
+test('extractPdf falls back to empty text when getText returns an object without text', async () => {
+  // pdf-parse 2.4.5 getText() normally returns { pages, text, total }; a parser
+  // that resolves an object with no usable `.text` (a degraded/exotic PDF)
+  // must land on the `out.text || ''` falsy leaf of the normalization at
+  // extractors.js:77, empty-streaming instead of throwing.
+  const realLoad = Module._load;
+  Module._load = function (request, parent, isMain) {
+    if (typeof request === 'string' && request === 'pdf-parse') {
+      return { PDFParse: class { async getText() { return { total: 0 }; } } };
+    }
+    return realLoad.apply(this, arguments);
+  };
+  try {
+    const text = await extractPdf(Buffer.from('%PDF-1.4\nanything'));
+    assert.strictEqual(text, '', 'an object without .text yields an empty stream');
+  } finally {
+    Module._load = realLoad;
+  }
+});
+
 test('extractDocx fails loudly on corrupt or docx-less input', () => {
   const { zipSync, strToU8 } = require('fflate');
   // a valid zip that is missing word/document.xml
