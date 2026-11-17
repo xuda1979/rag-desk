@@ -1569,6 +1569,108 @@ test('CORS headers ride on actual responses, not just preflight', async () => {
   kb.close();
 });
 
+test('CORS headers ride on error responses too (401/404 stay cross-origin readable)', async () => {
+  const { kb, server, port } = await startServer({ adminToken: 'adm0', chatToken: 'ch0' });
+  // Browser widgets must be able to READ a rejection even when the request
+  // fails: without Access-Control-Allow-Origin on the 401/404 the browser
+  // masks the JSON error as a network failure and admin.js / demo.js would
+  // silently blank instead of surfacing "unauthorized". The CORS middleware
+  // runs before auth and the /api 404 catch-all, so every error response that
+  // follows an Origin request must still carry the header.
+  const withOrigin = (method, reqPath, headers = {}) =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        { host: 'localhost', port, path: reqPath, method, headers: { Origin: 'https://page.example', ...headers } },
+        (r) => {
+          r.resume();
+          r.on('end', () =>
+            resolve({ status: r.statusCode, body: r.headers['content-type'], allowOrigin: r.headers['access-control-allow-origin'] })
+          );
+        }
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  try {
+    // admin 401 (missing x-admin-token) still reflects the origin
+    const admin = await withOrigin('GET', '/api/admin/docs');
+    assert.strictEqual(admin.status, 401);
+    assert.strictEqual(admin.allowOrigin, 'https://page.example', 'admin 401 must stay cross-origin readable');
+
+    // chat 401 (missing Bearer) still reflects the origin
+    const chat = await withOrigin('POST', '/api/chat', {
+      'Content-Type': 'application/json',
+      'Content-Length': '0',
+    });
+    assert.strictEqual(chat.status, 401);
+    assert.strictEqual(chat.allowOrigin, 'https://page.example', 'chat 401 must stay cross-origin readable');
+
+    // unknown API path 404 still reflects the origin
+    const unknown = await withOrigin('GET', '/api/nope');
+    assert.strictEqual(unknown.status, 404);
+    assert.strictEqual(unknown.allowOrigin, 'https://page.example', 'api 404 must stay cross-origin readable');
+
+    // even the central error-handler responses (500 path) keep CORS headers
+    const failingKb = {
+      engineInfo: () => {
+        throw new Error('boom');
+      },
+      getQueryStats: () => ({ total: 0, with_answer: 0 }),
+    };
+    const app2 = buildApp(failingKb, {});
+    const server2 = await new Promise((resolve) => {
+      const s = app2.listen(0, () => resolve(s));
+    });
+    try {
+      const res = await new Promise((resolve, reject) => {
+        http
+          .get(
+            { host: 'localhost', port: server2.address().port, path: '/api/health', headers: { Origin: 'https://page.example' } },
+            (r) => {
+              r.resume();
+              r.on('end', () =>
+                resolve({ status: r.statusCode, allowOrigin: r.headers['access-control-allow-origin'] })
+              );
+            }
+          )
+          .on('error', reject);
+      });
+      assert.strictEqual(res.status, 500);
+      assert.strictEqual(res.allowOrigin, 'https://page.example', 'engine 500 must stay cross-origin readable');
+    } finally {
+      server2.close();
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
+test('CORS wildcard allow-origin is returned on error responses too', async () => {
+  const { kb, server, port } = await startServer({ allowOrigin: '*' });
+  // with RAGDESK_ALLOW_ORIGIN=* every response (not just preflight) returns the
+  // wildcard; an untoken-gated 404 here proves the wildcard flows through the
+  // /api catch-all as well as happy paths.
+  try {
+    const res = await new Promise((resolve, reject) => {
+      http
+        .get(
+          { host: 'localhost', port, path: '/api/nope', headers: { Origin: 'https://any.example' } },
+          (r) => {
+            r.resume();
+            r.on('end', () => resolve({ status: r.statusCode, allowOrigin: r.headers['access-control-allow-origin'] }));
+          }
+        )
+        .on('error', reject);
+    });
+    assert.strictEqual(res.status, 404);
+    assert.strictEqual(res.allowOrigin, '*', 'wildcard must reach error responses, not just preflight');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/admin/docs rows carry the size and created_at fields the admin table renders', async () => {
   const { kb, server, port } = await startServer();
   // admin.js renders d.size (KB), d.created_at, d.kind and d.chunk_count from
