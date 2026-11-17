@@ -2089,6 +2089,40 @@ test('demo example chips fill the input and submit via requestSubmit; widget FAB
   }
 });
 
+test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
+  const { kb, server, port } = await startServer();
+  // The demo page's domain <select> and example chips are driven by demo.js:
+  // switching domains must re-render the greeting and examples, the auto-sync
+  // refresh must preserve the user's selection, and renderBotMessage must cap
+  // citation excerpts and only claim a confidence percentage when there is a
+  // top hit (mirroring the wire contract: miss responses carry no top field).
+  try {
+    const res = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(res.status, 200);
+    // renderFor is the single re-render entry: greeting from the active preset
+    // plus a fresh example-chip row (empty for presets without examples).
+    assert.ok(res.body.includes("greetingEl.textContent = d.greeting || '';"), 'renderFor must show the active preset greeting');
+    assert.ok(res.body.includes('renderExamples();'), 'renderFor must rebuild the example chips');
+    // both the change listener and the initial render run renderFor — a domain
+    // switch re-renders, and the page opens showing the default domain.
+    assert.ok(res.body.includes("domainSelect.addEventListener('change', () => renderFor(domainSelect.value));"), 'domain switch must re-render via renderFor');
+    assert.ok(res.body.includes('renderFor(domainSelect.value);'), 'demo must render the initial domain at boot');
+    // fillSelect preserves the user's current selection across the /api/domains
+    // auto-sync refresh, falling back to the first server preset otherwise.
+    assert.ok(res.body.includes('domainSelect.value = domains[prev] ? prev : (list[0] || {}).id;'), 'auto-sync must preserve the selected domain');
+    // renderBotMessage: excerpt is capped to 160 characters before interpolation
+    // (the wire tests lock excerpt derivation server-side; this is the client's
+    // truncation boundary) and the confidence line renders only on a top hit.
+    assert.match(res.body, /esc\(c\.excerpt \|\| ''\)\.slice\(0, 160\)/, 'citation excerpt must be capped at 160 chars');
+    assert.ok(res.body.includes('const conf = data.top ?'), 'confidence line must be gated on a top hit');
+    assert.ok(res.body.includes('<div class="bot-meta">'), 'bot messages must render the meta block');
+    assert.ok(res.body.includes('· 模式：'), 'meta block must join confidence and mode');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin.js routes each data function to its wire-locked endpoint; widget close hides the panel; demo input carries the placeholder', async () => {
   const { kb, server, port } = await startServer();
   // The /api/admin/* wire tests and the admin.html form alone do not prove the
