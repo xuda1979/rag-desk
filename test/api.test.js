@@ -2475,6 +2475,35 @@ test('admin.js token gate client-side: the token lives in localStorage under rag
   }
 });
 
+test('demo.js builds the domain <option>s and example chips via createElement/appendChild, clearing stale rows before each rebuild', async () => {
+  const { kb, server, port } = await startServer();
+  // The selection-preservation and chip-behavior tests lock fillSelect/renderExamples
+  // effects, but not how the two list renderers materialize DOM nodes. Lock the
+  // mechanics: fillSelect clears the <select> and appends one <option> per preset
+  // (value = id, text = label); renderExamples clears the examples area and appends
+  // one <button> chip per example with a click handler. A renderer that stops
+  // clearing stale rows (double-listing after an auto-sync) or stops appending
+  // (rendering only the first preset) must fail.
+  try {
+    const res = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(res.status, 200);
+    // fillSelect rebuilds the <select> from the server list
+    assert.ok(res.body.includes("domainSelect.innerHTML = '';"), 'fillSelect must clear stale options before rebuilding');
+    assert.ok(res.body.includes("const opt = document.createElement('option');"), 'each domain entry must be a fresh <option> element');
+    assert.ok(res.body.includes('opt.value = d.id;'), 'the option value must be the domain id the server returns');
+    assert.ok(res.body.includes('opt.textContent = d.label;'), 'the option text must be the preset label the page displays');
+    assert.ok(res.body.includes('domainSelect.appendChild(opt);'), 'each option must be appended into the domain select');
+    // renderExamples rebuilds the chip row from the active domain preset
+    assert.ok(res.body.includes("examplesEl.innerHTML = '';"), 'renderExamples must clear stale chips before rebuilding');
+    assert.ok(res.body.includes("const b = document.createElement('button');"), 'each example question must be a <button> element');
+    assert.ok(res.body.includes("b.addEventListener('click', () => {"), 'each chip must attach the click handler that fills and submits');
+    assert.ok(res.body.includes('examplesEl.appendChild(b);'), 'each chip must be appended into the examples container');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
   const { kb, server, port } = await startServer();
   // The demo page's domain <select> and example chips are driven by demo.js:
