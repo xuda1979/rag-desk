@@ -2386,6 +2386,59 @@ test('CORS headers ride on the 413 oversized-body error too (body parsers run af
   }
 });
 
+test('CORS headers ride on the 400 malformed-JSON parse error too (parse-failed branch)', async () => {
+  const { kb, server, port } = await startServer();
+  // express.json() rejects a non-JSON body with entity.parse.failed BEFORE the
+  // route; the central handler maps it to a 400. Same CORS concern as the 413:
+  // a browser widget posting a broken payload must still be able to READ the
+  // JSON error (masked as a network failure otherwise), so lock the reflected
+  // Origin with the full header set AND the exact stable err.message body that
+  // production.test.js only asserts loosely by type, un-origined.
+  try {
+    const res = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/chat',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength('{bad json'),
+            Origin: 'https://widget.example',
+          },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () =>
+            resolve({
+              status: r.statusCode,
+              allowOrigin: r.headers['access-control-allow-origin'],
+              allowMethods: r.headers['access-control-allow-methods'],
+              allowHeaders: r.headers['access-control-allow-headers'],
+              ct: r.headers['content-type'],
+              body: JSON.parse(out),
+            })
+          );
+        }
+      );
+      req.on('error', reject);
+      req.write('{bad json');
+      req.end();
+    });
+    assert.strictEqual(res.status, 400, 'malformed JSON body must 400, not 500/HTML');
+    assert.match(res.ct, /application\/json/, 'parse errors must stay stable JSON for client JSON.parse');
+    assert.match(res.body.error, /Expected property name or '}'/, 'parse-failed surfaces the parser message as error');
+    assert.strictEqual(res.allowOrigin, 'https://widget.example', '400 parse error must stay cross-origin readable');
+    assert.strictEqual(res.allowMethods, 'GET,POST,DELETE,OPTIONS');
+    assert.strictEqual(res.allowHeaders, 'Content-Type, x-admin-token, Authorization');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('CORS wildcard allow-origin is returned on error responses too', async () => {
   const { kb, server, port } = await startServer({ allowOrigin: '*' });
   // with RAGDESK_ALLOW_ORIGIN=* every response (not just preflight) returns the
