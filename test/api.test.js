@@ -848,6 +848,59 @@ test('admin upload endpoint rejects more than 20 files with a 400', async () => 
   kb.close();
 });
 
+test('admin upload endpoint rejects a file over the 50MB multer cap with the 413 JSON branch', async () => {
+  const { kb, server, port } = await startServer();
+  const boundary = '----rd-oversize';
+  const head = `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="huge.bin"\r\nContent-Type: application/octet-stream\r\n\r\n`;
+  const tail = `\r\n--${boundary}--\r\n`;
+  // One byte past the 50MB multer limit (src/app.js) so the streaming upload
+  // aborts with LIMIT_FILE_SIZE before any ingest can happen.
+  const payload = Buffer.alloc(50 * 1024 * 1024 + 1, 0x61);
+  const body = Buffer.concat([Buffer.from(head), payload, Buffer.from(tail)]);
+  try {
+    const res = await new Promise((resolve, reject) => {
+      let done = false;
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/admin/upload',
+          method: 'POST',
+          headers: {
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': body.length,
+          },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => {
+            done = true;
+            let parsed = out;
+            try {
+              parsed = JSON.parse(out);
+            } catch (_) {}
+            resolve({ status: r.statusCode, body: parsed });
+          });
+        }
+      );
+      // The server aborts the stream mid-upload, so the client socket may
+      // reset after the 413 response is already received — never reject then.
+      req.on('error', (e) => {
+        if (!done) reject(e);
+      });
+      req.write(body);
+      req.end();
+    });
+    assert.strictEqual(res.status, 413, 'LIMIT_FILE_SIZE maps to 413');
+    assert.match(res.body.error, /file too large \(max 50MB\)/);
+    assert.deepStrictEqual(kb.getAllDocs(), [], 'no ingest happens for the rejected file');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('DELETE of a missing document returns 404', async () => {
   const { kb, server, port } = await startServer();
   const res = await new Promise((resolve, reject) => {
