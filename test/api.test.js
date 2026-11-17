@@ -2119,6 +2119,47 @@ test('widget.js is a self-contained embed: single-instance guard, injected style
   }
 });
 
+test('demo.js and widget.js emit the exact class names the stylesheets style for citations, meta and confidence', async () => {
+  const { kb, server, port } = await startServer();
+  // The rendering suites prove the fields reach innerHTML; this one locks the
+  // CSS hooks the stylesheets actually target. /style.css styles
+  // .bot-cite/.cite-doc (demo chat) and the widget's injected stylesheet styles
+  // .rd-meta/.rd-cite — a rewire that drops a class name leaves the bubble
+  // unstyled without anyone noticing. Pin the emitted class names and the
+  // confidence literals that go with them.
+  try {
+    const demo = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(demo.status, 200);
+    // citation line: the outer span and its bold doc-name child both carry the
+    // class names /style.css selects on
+    assert.ok(
+      demo.body.includes('<span class="bot-cite"><span class="cite-doc">'),
+      'demo citation must emit the bot-cite/cite-doc hooks style.css styles'
+    );
+    // the confidence prefix says 可置信度 inside the .bot-meta block
+    assert.ok(demo.body.includes('可置信度 '), 'demo confidence line must keep the 可置信度 label');
+
+    const widget = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(widget.status, 200);
+    // widget bot message: the meta line is an .rd-meta span and the whole block
+    // is .rd-msg .bot — the two hooks the injected stylesheet selects on
+    assert.ok(
+      widget.body.includes('<span class="rd-meta">离线检索 · 置信度 '),
+      'widget must emit the rd-meta span with its offline-confidence label'
+    );
+    assert.ok(widget.body.includes("m.className = 'rd-msg ' + who;"), 'widget messages must carry the rd-msg hook its CSS targets');
+    // /style.css must still carry the demo-side hooks (guarded against a CSS
+    // rewire that restyles by id and silently orphans the emitted classes)
+    const css = await get(`http://localhost:${port}/style.css`);
+    assert.strictEqual(css.status, 200);
+    assert.ok(css.body.includes('.bot-cite {'), 'style.css must keep the .bot-cite rule');
+    assert.ok(css.body.includes('.bot-cite .cite-doc {'), 'style.css must keep the .cite-doc emphasis rule');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
   const { kb, server, port } = await startServer();
   // The demo page's domain <select> and example chips are driven by demo.js:
