@@ -2089,6 +2089,36 @@ test('demo example chips fill the input and submit via requestSubmit; widget FAB
   }
 });
 
+test('widget.js is a self-contained embed: single-instance guard, injected stylesheet, panel chrome and auto-scroll', async () => {
+  const { kb, server, port } = await startServer();
+  // The MIME and data-* wiring suites prove the script SERVES and reads config;
+  // this one locks that it RENDERS without depending on the host page: a global
+  // guard tolerates double-loading, the stylesheet is injected into document.head
+  // (never a /style.css link), the close button is aria-labelled, the input bar
+  // exists with its placeholder, and new messages auto-scroll the panel body.
+  try {
+    const res = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(res.status, 200);
+    // embedding a <script src=widget.js> twice must not render two FABs/panels
+    assert.ok(res.body.includes('if (window.__ragDeskWidget) return;'), 'widget must refuse a second instance');
+    assert.ok(res.body.includes('window.__ragDeskWidget = true;'), 'widget must flag itself as the mounted instance');
+    // self-contained CSS: inject a <style> tag, do not require host-page styles
+    assert.ok(res.body.includes("var style = document.createElement('style');"), 'widget must create its own style element');
+    assert.ok(res.body.includes('style.textContent = css;'), 'widget must fill the injected stylesheet');
+    assert.ok(res.body.includes('document.head.appendChild(style);'), 'widget must attach its stylesheet to <head>');
+    // panel chrome: the close button is reachable and aria-labelled, the input
+    // bar is present with a placeholder so the compact panel has affordances
+    assert.ok(res.body.includes('aria-label="关闭">×</button>'), 'widget close button must be aria-labelled');
+    assert.ok(res.body.includes('placeholder="请输入问题…"'), 'widget input must keep an inline placeholder');
+    // messages auto-scroll so the newest bubble stays visible in the 440px panel
+    assert.ok(res.body.includes('m.className = \'rd-msg \' + who;'), 'widget messages must carry the rd-msg role class');
+    assert.ok(res.body.includes('body.scrollTop = body.scrollHeight;'), 'widget must auto-scroll on new messages');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
   const { kb, server, port } = await startServer();
   // The demo page's domain <select> and example chips are driven by demo.js:
