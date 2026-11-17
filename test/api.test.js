@@ -2059,6 +2059,36 @@ test('/api/admin/docs rows carry sha256, status and mime; detail chunks expose e
   }
 });
 
+test('/api/admin/docs response body is exactly { docs }; detail body is exactly { doc, chunks }', async () => {
+  const { kb, server, port } = await startServer();
+  // admin.js reads the docs list as data.docs and the detail view as data.chunks;
+  // row-level key sets are pinned elsewhere, but no test locks the BODY-level
+  // shape, so a route that renames or wraps the array (e.g. { docs, total } or
+  // { list }) would silently blank the table. Pin the empty state exactly, the
+  // populated key set, and the detail body's exact { doc, chunks } keys.
+  try {
+    const empty = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(empty.status, 200);
+    assert.deepStrictEqual(empty.body, { docs: [] }, 'fresh DB body is exactly { docs: [] }, no extra keys');
+
+    await kb.ingestBuffer('a.md', Buffer.from('本诊所工作日 8:00 开门。'));
+    await kb.ingestBuffer('b.md', Buffer.from('供应商须取得营业执照。'));
+    const list = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(list.status, 200);
+    assert.deepStrictEqual(Object.keys(list.body).sort(), ['docs'], 'the docs response carries exactly the docs key');
+    assert.ok(Array.isArray(list.body.docs));
+    assert.strictEqual(list.body.docs.length, 2);
+    assert.ok(list.body.docs.every((d) => d && typeof d === 'object'));
+
+    const detail = await get(`http://localhost:${port}/api/admin/docs/${list.body.docs[0].id}`);
+    assert.strictEqual(detail.status, 200);
+    assert.deepStrictEqual(Object.keys(detail.body).sort(), ['chunks', 'doc'], 'the detail response carries exactly doc + chunks');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/admin/logs body is { logs, stats } and each row carries the full queries_log shape', async () => {
   const { kb, server, port } = await startServer();
   // listQueryLogs returns q.* (id/query/domain/matched/top_score/top_doc_id/
