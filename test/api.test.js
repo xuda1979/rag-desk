@@ -2283,6 +2283,52 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('widget.js error/answer render chain: HTTP-status fallback, newline-to-<br> and the meta+cites bubble composition', async () => {
+  const { kb, server, port } = await startServer();
+  // The token-gated 401 lock proves the widget gets a non-2xx path, and the
+  // citation-cap test proves the r.json() chain exists — but the two middle
+  // links are unpinned: (1) a non-ok response must carry the HTTP status when
+  // the server sends no error field (230.js locked only the data.error prefix
+  // at r.json(); the ('请求失败（HTTP ' + r.status + '）') fallback decides
+  // what a bare 401/500 shows), and (2) the answer line must convert newlines
+  // to <br> before the meta span is appended (demo.js's esc-same-replace is
+  // locked; the widget's ES5-form is not). Together with the already-pinned
+  // rd-meta span this locks the whole bot-bubble composition assembly.
+  try {
+    const res = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(res.status, 200);
+    // non-ok fallback: data.error wins when present, otherwise the HTTP status
+    // is surfaced so a bare 401/500 is never rendered as "（暂无回答）"
+    assert.ok(
+      res.body.includes("if (!r.ok) throw new Error(data.error || ('请求失败（HTTP ' + r.status + '）'));"),
+      'widget must throw the server error or an HTTP-status fallback on non-ok'
+    );
+    // the JSON payload must be read before the status check (r.json().then()
+    // is the only way the data.error field and the render payload come out)
+    assert.ok(
+      res.body.includes('return r.json().then(function (data) {'),
+      'widget must parse the JSON payload inside the status check'
+    );
+    // answer line: the ('暂无回答') fallback is already pinned (data.answer ||
+    // '（暂无回答）'); lock the newline-to-<br> render that follows it, which
+    // keeps multi-paragraph answers readable in the white-space:pre-wrap panel
+    assert.ok(
+      res.body.includes("var ans = esc(data.answer || '（暂无回答）').replace(/\\n/g, '<br>');"),
+      'widget must convert answer newlines to <br> for rendering'
+    );
+    // the composed bubble: ans then the rd-meta span (already pinned as the
+    // .rd-meta hook) then the capped citations — the ans + prefix makes the
+    // whole chain continuous in the source
+    assert.ok(
+      res.body.includes("addMsg('bot', ans + '<span class=\"rd-meta\">离线检索 · 置信度 ' +"),
+      'widget must append the rd-meta confidence span directly after the answer'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin.js binds its page elements by the ids admin.html ships — every handler and render target resolves at load', async () => {
   const { kb, server, port } = await startServer();
   // The demo-side counterpart locks the six demo bindings; the admin page has
