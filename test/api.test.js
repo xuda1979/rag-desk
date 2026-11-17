@@ -1560,6 +1560,105 @@ test('token-gated admin and chat endpoints reject without their tokens', async (
   }
 });
 
+test('configured admin token gates log, stats and doc-detail reads and the upload write; public routes stay open', async () => {
+  const { kb, server, port } = await startServer({ adminToken: 'adm1' });
+  // The baseline token test pinned docs-list/delete and chat; this one pins the
+  // REMAINING /api/admin/* routes under a configured token. Discriminators:
+  //  - a missing-token GET on an unknown doc id must read 401 (the gate STEPS
+  //    BEFORE the 404 lookup), never a leak of the not-found body;
+  //  - an unauthenticated upload carrying a VALID multipart file must 401 and,
+  //    crucially, must NOT index it (gate precedes multer + handler, so auth
+  //    failure has zero side effects);
+  //  - health and domains stay public when only the admin token is configured.
+  const withAdmin = (method, reqPath, headers = {}) =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        { host: 'localhost', port, path: reqPath, method, headers: { 'x-admin-token': 'adm1', ...headers } },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => {
+            let body = out;
+            try { body = JSON.parse(out || '{}'); } catch (_) { /* keep raw */ }
+            resolve({ status: r.statusCode, body });
+          });
+        }
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  try {
+    // logs and stats reads reject without the token…
+    assert.strictEqual((await get(`http://localhost:${port}/api/admin/logs`)).status, 401);
+    assert.strictEqual((await get(`http://localhost:${port}/api/admin/stats`)).status, 401);
+    // …and open with it (empty DB: stable empty shapes).
+    const logs = await withAdmin('GET', '/api/admin/logs');
+    assert.strictEqual(logs.status, 200);
+    assert.deepStrictEqual(logs.body, { logs: [], stats: { total: 0, with_answer: 0 } });
+    assert.strictEqual((await withAdmin('GET', '/api/admin/stats')).status, 200);
+
+    // doc detail: 401 when unauthenticated even though the doc id doesn't
+    // exist — the gate must run before the 404 lookup.
+    assert.strictEqual((await get(`http://localhost:${port}/api/admin/docs/999`)).status, 401);
+    assert.strictEqual((await withAdmin('GET', '/api/admin/docs/999')).status, 404);
+    assert.equal((await withAdmin('GET', '/api/admin/docs/999')).body.error, 'not found');
+
+    // upload: a valid multipart file posted WITHOUT the token is rejected at
+    // the gate, and the bytes are NOT indexed (auth failure has no side
+    // effect). The same bytes with the token index cleanly.
+    const boundary = '----rd-auth';
+    const content = Buffer.from('关于新设备采购的中标通知，中标人蓝天科技公司。');
+    const multipart = (authHeader) => {
+      const body = Buffer.concat([
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="secret.md"\r\nContent-Type: text/markdown\r\n\r\n`
+        ),
+        content,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]);
+      return new Promise((resolve, reject) => {
+        const req = http.request(
+          {
+            host: 'localhost',
+            port,
+            path: '/api/admin/upload',
+            method: 'POST',
+            headers: {
+              'Content-Type': `multipart/form-data; boundary=${boundary}`,
+              'Content-Length': body.length,
+              ...(authHeader ? { 'x-admin-token': 'adm1' } : {}),
+            },
+          },
+          (r) => {
+            let out = '';
+            r.on('data', (c) => (out += c));
+            r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+          }
+        );
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+      });
+    };
+    const unauthUpload = await multipart(false);
+    assert.strictEqual(unauthUpload.status, 401);
+    assert.deepStrictEqual(await kb.getAllDocs(), [], 'unauthorized upload must not index anything');
+    const authUpload = await multipart(true);
+    assert.strictEqual(authUpload.status, 200);
+    assert.strictEqual(authUpload.body.results[0].action, 'indexed');
+    assert.deepStrictEqual((await kb.getAllDocs()).map((d) => d.filename), ['secret.md']);
+
+    // public surfaces stay open under a configured admin token.
+    assert.strictEqual((await get(`http://localhost:${port}/api/health`)).status, 200);
+    const domains = await get(`http://localhost:${port}/api/domains`);
+    assert.strictEqual(domains.status, 200);
+    assert.ok(domains.body.domains.length >= 1, 'domain presets remain public');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin upload with no files returns a stable JSON 400', async () => {
   const { kb, server, port } = await startServer();
   // POST with no multipart body at all
