@@ -32,6 +32,31 @@ test('parseCsv: empty fields and empty input parse without throwing', () => {
   assert.deepStrictEqual(parseCsv(''), []);
 });
 
+test('parseCsv: null/undefined coerce to empty text, numbers stringify', () => {
+  assert.deepStrictEqual(parseCsv(null), [], 'null input yields no rows, not a throw');
+  assert.deepStrictEqual(parseCsv(undefined), [], 'undefined input yields no rows');
+  assert.deepStrictEqual(parseCsv(42), [['42']], 'non-string input is String()-coerced');
+});
+
+test('parseCsv: an unterminated trailing quote runs to EOF and yields the field', () => {
+  assert.deepStrictEqual(parseCsv('a,"unterminated'), [['a', 'unterminated']]);
+});
+
+test('parseCsv: a lone CR ends the row without consuming the following char', () => {
+  assert.deepStrictEqual(parseCsv('a,b\rc,d'), [
+    ['a', 'b'],
+    ['c', 'd'],
+  ]);
+});
+
+test('parseCsv: a final row without a trailing newline is still committed', () => {
+  assert.deepStrictEqual(parseCsv('a,b'), [['a', 'b']]);
+  assert.deepStrictEqual(parseCsv('a,b\r\nc'), [
+    ['a', 'b'],
+    ['c'],
+  ]);
+});
+
 test('textFromBuffer: md/txt/markdown pass through as utf8 (case-insensitive ext)', () => {
   const buf = Buffer.from('hello\n');
   assert.strictEqual(textFromBuffer('a.md', buf), 'hello\n');
@@ -86,4 +111,20 @@ test('extractDocx fails loudly on corrupt or docx-less input', () => {
   // not a zip at all / empty buffer -> fflate rejects
   assert.throws(() => extractDocx(Buffer.from('not a zip at all')), /invalid zip/);
   assert.throws(() => extractDocx(Buffer.alloc(0)), /invalid zip/);
+});
+
+test('extractDocx: <w:t> runs with attributes are captured, empty paragraphs are skipped', () => {
+  const { zipSync, strToU8 } = require('fflate');
+  const xml =
+    '<?xml version="1.0"?><w:document><w:body>' +
+    '<w:p><w:r><w:t>第一段</w:t></w:r></w:p>' +
+    '<w:p><w:r><w:t xml:space="preserve">带属性 的文本</w:t></w:r></w:p>' +
+    '<w:p></w:p>' +
+    '<w:p><w:r><w:t>最后</w:t></w:r></w:p>' +
+    '</w:body></w:document>';
+  const buf = zipSync({ 'word/document.xml': strToU8(xml) });
+  const text = extractDocx(buf);
+  assert.strictEqual(text, '第一段\n带属性 的文本\n最后', 'attribute-bearing <w:t> tags match and paragraphs interleave with \n');
+  assert.doesNotMatch(text, /\n\n/, 'the empty <w:p></w:p> contributes no blank line');
+  assert.doesNotMatch(text, /<|>/, 'markup must not leak into the extracted text');
 });
