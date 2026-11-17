@@ -727,3 +727,66 @@ test('prod: server.js without RAGDESK_DB or PORT falls back to data/ragdesk.db a
     process.env.RAGDESK_DB = saved.RAGDESK_DB;
   }
 });
+
+test('prod: server.js exits 0 promptly on SIGTERM and SIGINT (graceful Docker stop contract)', async () => {
+  // The compose file stops the container via SIGTERM; server.js lines 50-55
+  // map both SIGTERM and SIGINT to a close() that terminates with exit code 0.
+  // The other boot tests fire SIGTERM only as teardown and never assert the
+  // outcome, so this contract was unpinned. Spawn a real boot per signal and
+  // assert code 0, a clean (non-default) signal disposition, and a bounded
+  // shutdown so `docker compose stop` never waits out the grace period.
+  const bootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rd-sig-'));
+  const dbPath = path.join(bootDir, 'sig.db');
+  const freePort = () =>
+    new Promise((resolve, reject) => {
+      const probe = net.createServer();
+      probe.on('error', reject);
+      probe.listen(0, () => {
+        const p = probe.address().port;
+        probe.close(() => resolve(p));
+      });
+    });
+
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    const port = await freePort();
+    const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/server.js'], {
+      cwd: path.join(__dirname, '..'),
+      env: { ...process.env, RAGDESK_DB: dbPath, PORT: String(port) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout.on('data', (c) => (out += c));
+    child.stderr.on('data', (c) => (out += c));
+    const exited = new Promise((r) => child.on('exit', (code, sig) => r({ code, signal: sig })));
+    try {
+      let last;
+      for (let i = 0; i < 60; i++) {
+        try {
+          const r = await fetch(`http://127.0.0.1:${port}/api/health`);
+          if (r.ok) break;
+          last = r;
+        } catch (_) {
+          /* not up yet */
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (child.exitCode === null && !out.includes('RAG-Desk running')) {
+        assert.fail(`server did not boot on port ${port} (last status ${last && last.status})`);
+      }
+
+      const started = Date.now();
+      child.kill(signal);
+      const res = await exited;
+      const shutdownMs = Date.now() - started;
+
+      assert.strictEqual(res.code, 0, `${signal} must exit 0 for a graceful Docker stop`);
+      assert.strictEqual(res.signal, null, `${signal} must be caught, not be the default fatal disposition`);
+      assert.ok(shutdownMs < 5000, `${signal} shutdown should be prompt, took ${shutdownMs}ms`);
+      assert.ok(out.includes('RAG-Desk running'), `${signal} boot should log the running banner`);
+    } finally {
+      if (child.exitCode === null) child.kill('SIGKILL');
+      await exited;
+    }
+  }
+  fs.rmSync(bootDir, { recursive: true, force: true });
+});
