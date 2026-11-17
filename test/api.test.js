@@ -2385,6 +2385,38 @@ test('demo.js offline FALLBACK presets: the in-page legal/medical/procurement/ge
   }
 });
 
+test('demo-side class hooks: the .msg/.bot-meta/.chat/.ask-bar/.examples/.demo-card/.demo-toolbar/.demo-footer rules style.css ships stay paired with the classes demo.js emits and index.html carries', async () => {
+  // The widget skin contract (rd-msg) and the admin skin (.stats/.docs-table/
+  // .chunk/...) are locked; the demo chat skin is not. A rewire that restyles
+  // the demo chat by id, or a dropped rule, would silently orphan the class
+  // names demo.js message builder emits and the index.html skeleton uses, so
+  // lock the class-name contract on all three ends: the served stylesheet must
+  // keep every demo-chat rule, demo.js must keep emitting the .msg role class,
+  // and index.html must keep the containers those rules select on.
+  const { kb, server, port } = await startServer();
+  try {
+    const css = await get(`http://localhost:${port}/style.css`);
+    assert.strictEqual(css.status, 200);
+    for (const rule of ['.chat {', '.msg {', '.msg.user {', '.msg.bot {', '.bot-meta {', '.ask-bar {', '.examples {', '.demo-card {', '.demo-toolbar {', '.demo-footer {']) {
+      assert.ok(css.body.includes(rule), `style.css must keep the demo-chat rule "${rule}"`);
+    }
+
+    const js = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(js.status, 200);
+    assert.ok(js.body.includes("el.className = 'msg ' + role;"), 'demo.js must emit the .msg role class its CSS targets');
+
+    const idx = await get(`http://localhost:${port}/`);
+    assert.strictEqual(idx.status, 200);
+    assert.ok(idx.body.includes('<div id="chat" class="chat"></div>'), 'demo page must keep the chat container with the .chat hook');
+    assert.ok(idx.body.includes('<div class="demo-toolbar">'), 'demo page must keep the toolbar with the .demo-toolbar hook');
+    assert.ok(idx.body.includes('<section class="demo-card">'), 'demo page must keep the card with the .demo-card hook');
+    assert.ok(idx.body.includes('<footer class="demo-footer dim">'), 'demo page must keep the footer with the .demo-footer hook');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
   const { kb, server, port } = await startServer();
   // The demo page's domain <select> and example chips are driven by demo.js:
