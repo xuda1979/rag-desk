@@ -5118,3 +5118,31 @@ test('widget.js fallback route: hidden static file still answers JSON 404 with a
     kb2.close();
   }
 });
+
+test('index fallback route: hidden static file still answers JSON 404, restored file serves 200', async () => {
+  const indexPath = path.join(__dirname, '..', 'public', 'index.html');
+  const hidePath = indexPath + '.route-test.hid';
+  fs.renameSync(indexPath, hidePath);
+  const { kb, server, port } = await startServer();
+  try {
+    // no res.type() on the / route, so the central error handler's res.json()
+    // supplies application/json (unlike the /widget.js route's JS type)
+    const hidden = await get(`http://localhost:${port}/`);
+    assert.strictEqual(hidden.status, 404);
+    assert.match(hidden.headers['content-type'], /application\/json/);
+    assert.match(hidden.body.error, /ENOENT[^]*index\.html/);
+  } finally {
+    server.close();
+    kb.close();
+    fs.renameSync(hidePath, indexPath);
+  }
+  const { kb: kb2, server: server2, port: port2 } = await startServer();
+  try {
+    const restored = await get(`http://localhost:${port2}/`);
+    assert.strictEqual(restored.status, 200, 'restoring the file must return the statically-served 200');
+    assert.match(restored.headers['content-type'], /text\/html/);
+  } finally {
+    server2.close();
+    kb2.close();
+  }
+});
