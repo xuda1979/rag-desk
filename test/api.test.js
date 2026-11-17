@@ -2248,6 +2248,41 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('demo.js submit flow: press send and the question is echoed escaped, the input clears, the pending bubble is replaced by the render, and the panel scrolls; admin.js builds chunk rows via createElement + className', async () => {
+  const { kb, server, port } = await startServer();
+  // The submit event is the single entry point of the demo's asking loop: a
+  // rewire that stops binding it (or keeps the form default) would page-reload
+  // on every question instead of calling /api/chat. The wire locks pin the
+  // fetch body and error surfaces, but not the wiring itself. Likewise the
+  // admin chunk rows are appended as real DOM elements (className 'chunk'),
+  // not innerHTML strings — the innerHTML contract is already pinned, the
+  // createElement path is not.
+  try {
+    const demo = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(demo.status, 200);
+    // the ask-form must be submitted via JS, never the native page reload
+    assert.ok(demo.body.includes("form.addEventListener('submit', async (e) => {"), 'demo must bind the ask-form submit listener');
+    assert.ok(demo.body.includes('e.preventDefault();'), 'demo must prevent the form default page reload');
+    // the typed question is echoed as an escaped user bubble, then the box clears
+    assert.ok(demo.body.includes("addMsg('user', esc(q));"), 'demo must echo the user question escaped');
+    assert.ok(demo.body.includes("input.value = '';"), 'demo must clear the input after echoing the question');
+    // the pending bubble captured before fetch is replaced by the rendered answer,
+    // and the panel scrolls to the newest message on every send
+    assert.ok(demo.body.includes('thinking.innerHTML = renderBotMessage(data);'), 'demo must replace the pending bubble with the rendered answer');
+    assert.ok(demo.body.includes('chatEl.scrollTop = chatEl.scrollHeight;'), 'demo must scroll the message area to the newest bubble');
+
+    const admin = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(admin.status, 200);
+    // chunk rows are real <div class="chunk"> nodes created and appended per
+    // chunk — the class name is what /style.css selects on for the preview card
+    assert.ok(admin.body.includes("div.className = 'chunk';"), 'admin must build each chunk row as a .chunk element');
+    assert.ok(admin.body.includes('chunksBody.appendChild(div);'), 'admin must append each chunk row to the chunk list');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
   const { kb, server, port } = await startServer();
   // The demo page's domain <select> and example chips are driven by demo.js:
