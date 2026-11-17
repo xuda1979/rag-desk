@@ -2283,6 +2283,37 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('demo.js renderBotMessage: the answer is escaped first, then newlines render as <br>, and that exact string heads the return before the bot-meta block', async () => {
+  const { kb, server, port } = await startServer();
+  // The widget twin's answer line is pinned (var ans = esc(...).replace...)
+  // and the demo region pins data.answer || '（暂无回答）', the confidence
+  // ternary and the bot-meta open tag as separate tokens. What is not locked
+  // is the demo answer pipeline itself: the raw answer must be escaped before
+  // newlines become <br> (escaping neutralizes '<' in the text first, then the
+  // <br> tags survive), and the resulting string must literally head the
+  // composed return so every bubble is answer, then meta, then cites.
+  try {
+    const res = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(res.status, 200);
+    // esc() must run before .replace(/\n/g, '<br>') so user text like
+    // "<script>" is neutralized and only then do newlines become markup
+    assert.ok(
+      res.body.includes("const answer = esc(data.answer).replace(/\\n/g, '<br>');"),
+      'demo must escape the answer before rendering newlines as <br>'
+    );
+    // that pre-escaped answer string must head the composed return, feeding
+    // straight into the bot-meta block — answer, then meta, then cites
+    assert.match(
+      res.body,
+      /const answer = esc\(data\.answer\)\.replace\(\/\\n\/g, '<br>'\);\n[\s\S]*?return `\$\{answer\}<div class="bot-meta">\$\{conf\} · 模式：\$\{/,
+      'the escaped answer must head the bubble before the bot-meta block'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('widget.js control bindings: the FAB click handler toggles the panel and seeds the greeting once, and the keydown binding wires Enter to submit', async () => {
   const { kb, server, port } = await startServer();
   // The embed test pins the FAB glyph, the close-button listener and the
