@@ -2283,6 +2283,32 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('admin.js viewChunks: the reveal chain — loading placeholder, card un-hide, #id · filename header, body clear and per-chunk .chunk element build — stays contiguous', async () => {
+  const { kb, server, port } = await startServer();
+  // The chunk-detail pins cover the header line, the chunk-meta composition,
+  // the empty and error states, but not the reveal chain itself: viewChunks is
+  // reached only through the row view button, and if a rewire skipped
+  // chunksCard.hidden = false the card would stay hidden forever no matter how
+  // well the row buttons and the inner rows behave. The 加载中… placeholder is
+  // what the user sees the instant the row button fires, the header names the
+  // card, and the loop must clear the placeholder/previous rows before
+  // appending each new .chunk element. Lock the whole chain contiguous.
+  try {
+    const res = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(res.status, 200);
+    assert.ok(res.body.includes("chunksBody.innerHTML = '<div class=\"dim small\">加载中…</div>';"), 'viewChunks must show a loading placeholder first');
+    assert.ok(res.body.includes('chunksCard.hidden = false;'), 'viewChunks must un-hide the chunks card so the reveal survives the fetch');
+    assert.ok(res.body.includes("chunksDoc.textContent = filename ? `#${id} · ${filename}` : `#${id}`;"), 'viewChunks must name the card #id · filename');
+    assert.ok(res.body.includes("chunksBody.innerHTML = '';"), 'viewChunks must clear the placeholder and stale rows before rendering');
+    assert.ok(res.body.includes("const div = document.createElement('div');"), 'each chunk must get its own fresh element');
+    assert.ok(res.body.includes("div.className = 'chunk';"), 'each chunk element must carry the .chunk hook');
+    assert.ok(res.body.includes('chunksBody.appendChild(div);'), 'each built chunk must be appended to the chunks body');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('widget.js addMsg: every bubble is a fresh div carrying the rd-msg+role class, fed escaped html via innerHTML, appended to the panel body and scrolled into view', async () => {
   const { kb, server, port } = await startServer();
   // The class-hook test pins the rd-msg hook and the embed test pins the
