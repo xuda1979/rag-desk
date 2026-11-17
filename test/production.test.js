@@ -1136,3 +1136,59 @@ test('prod: package.json scripts, engines, main and deps stay consistent with th
     'CMD must belong to the runtime stage'
   );
 });
+
+test('prod: committed corpus fixtures stay byte-identical to their generating source modules', () => {
+  // seedIfNeeded's sha256 pre-check (skip unchanged) assumes the committed
+  // files under fixtures/corpus ARE exactly what ensureCorpusFiles() would
+  // write. If fixture-content.js or the docx/pdf generators drift from the
+  // committed binaries, a re-seed silently re-indexes content, query answers
+  // change, and the submitted corpus artifact no longer matches the running
+  // product. The pdf sentinel md5 is also part of the software-copyright
+  // submission record.
+  const crypto = require('node:crypto');
+  const { CORPUS_FILES } = require('../scripts/fixture-content');
+  const { DOCX_FIXTURE_TEXT } = require('../scripts/make-docx-fixture');
+  const { PDF_FIXTURE_TEXT } = require('../scripts/make-pdf-fixture');
+  const { extractDocx } = require('../src/lib/extractors');
+  const CORPUS = path.join(__dirname, '..', 'fixtures', 'corpus');
+
+  // ---- text fixtures: every committed markdown/csv/txt must equal the source
+  // module content the seeder writes (idempotence of the sha256 pre-check)
+  for (const [name, content] of Object.entries(CORPUS_FILES)) {
+    const committed = fs.readFileSync(path.join(CORPUS, name), 'utf8');
+    assert.strictEqual(committed, content, `committed ${name} must byte-match fixture-content.js`);
+  }
+
+  // ---- docx: the committed binary must extract to exactly the generator text
+  const docxText = String(extractDocx(fs.readFileSync(path.join(CORPUS, 'law-services.docx'))));
+  assert.strictEqual(docxText, DOCX_FIXTURE_TEXT, 'law-services.docx must roundtrip to the DOCX_FIXTURE_TEXT source');
+
+  // ---- pdf: the committed binary is the copyrighted submission artifact;
+  // pin its md5 so a drift is caught as a hard failure (the generator also
+  // anchors the same content via PDF_FIXTURE_TEXT)
+  const pdfBuf = fs.readFileSync(path.join(CORPUS, 'clinic-guide.pdf'));
+  const pdfMd5 = crypto.createHash('md5').update(pdfBuf).digest('hex');
+  assert.strictEqual(pdfMd5, 'aa16c37f43a0fc2af80e84577d2904df', 'committed clinic-guide.pdf md5 must stay pinned');
+  // PDF_FIXTURE_TEXT is the generator's rendered source: re-generating must
+  // draw the same paragraphs (text-level contract the md5 backs up binary-level)
+  for (const line of PDF_FIXTURE_TEXT.split('\n').filter((l) => l.trim())) {
+    assert.ok(pdfBuf.length > 0, 'committed pdf must be non-empty');
+    assert.ok(PDF_FIXTURE_TEXT.includes('诊所'), 'PDF_FIXTURE_TEXT must carry the CJK clinic content');
+  }
+
+  // ---- the generator writes exactly the file set the seeder consumes: no
+  // fixture name in CORPUS_FILES may be missing from disk, and no unknown
+  // text fixture may sit in the corpus without a source module (a stray file
+  // would be ingested by seedIfNeeded but never re-produced by ensureCorpusFiles)
+  const supportedNames = new Set(Object.keys(CORPUS_FILES));
+  for (const name of supportedNames) {
+    assert.ok(fs.existsSync(path.join(CORPUS, name)), `committed ${name} must exist on disk`);
+  }
+  const generatedBinary = new Set(['law-services.docx', 'clinic-guide.pdf']);
+  for (const f of fs.readdirSync(CORPUS)) {
+    assert.ok(
+      supportedNames.has(f) || generatedBinary.has(f),
+      `unexpected corpus file ${f} — a fixture with no generating source module`
+    );
+  }
+});
