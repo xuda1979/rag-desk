@@ -3026,6 +3026,50 @@ test('/api/chat citation excerpt is anchor-windowed on the wire, not head-cut', 
   }
 });
 
+test('/api/chat multi-doc hits rank citations by relevance — top is the first citation and the order is query-dependent', async () => {
+  const { kb, server, port } = await startServer();
+  // Every earlier chat test ingests a SINGLE matching doc, so the wire order
+  // of multiple citations is unasserted. storage.search() runs FTS5 bm25 with
+  // ORDER BY score ASC (lower = better) and the route must surface citations
+  // in that rank order with top === citations[0]. Two docs with inverted
+  // overlap for two queries make the order genuinely discriminating: a fixed
+  // insertion/ID ordering would fail the flipped case even though all values
+  // (docId 1 then 2) stay identical.
+  try {
+    await kb.ingestBuffer(
+      'strong.md',
+      Buffer.from('咨询费收取规则明确指出：咨询费按每小时 300 元收取，咨询费包含发票费用，咨询费多退少补。')
+    );
+    await kb.ingestBuffer('weak.md', Buffer.from('客户可在前台咨询费用相关事宜，电话 010-1234。'));
+
+    // Query favoring strong.md (咨询费 x4 vs the weak doc's single 咨询…费用):
+    // it must rank first and be echoed verbatim as top.
+    const strong = await post(`http://localhost:${port}/api/chat`, { query: '咨询费怎么收', limit: 10 });
+    assert.strictEqual(strong.status, 200);
+    assert.deepStrictEqual(
+      strong.body.citations.map((c) => c.document),
+      ['strong.md', 'weak.md'],
+      'the more on-topic doc must rank first for its own query'
+    );
+    assert.deepStrictEqual(strong.body.top, strong.body.citations[0], 'top is exactly the first (top-ranked) citation');
+    assert.strictEqual(strong.body.top.document, 'strong.md');
+
+    // Query favoring weak.md's only unique term: the rank order must invert.
+    const weak = await post(`http://localhost:${port}/api/chat`, { query: '费用', limit: 10 });
+    assert.strictEqual(weak.status, 200);
+    assert.deepStrictEqual(
+      weak.body.citations.map((c) => c.document),
+      ['weak.md', 'strong.md'],
+      'a query favoring the other doc must invert the citation order'
+    );
+    assert.strictEqual(weak.body.top.document, 'weak.md');
+    assert.deepStrictEqual(weak.body.top, weak.body.citations[0]);
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/admin/stats body is exactly { stats: { total, with_answer } } — full-payload lock', async () => {
   const { kb, server, port } = await startServer();
   // admin.js renders 总查询数/命中数/命中率 straight from stats.total and
