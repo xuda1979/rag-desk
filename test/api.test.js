@@ -1751,6 +1751,118 @@ test('configured admin token gates log, stats and doc-detail reads and the uploa
   }
 });
 
+test('chat-only token: /api/chat is gated while the admin area stays fully open', async () => {
+  const { kb, server, port } = await startServer({ chatToken: 'onlyChat' });
+  // The auth matrix pins both-tokens-on (admin0/chat0) and admin-only; this
+  // locks the THIRD corner: RAGDESK_CHAT_TOKEN configured with no admin token.
+  // Discriminators:
+  //  - /api/chat without/wrong Bearer -> the exact 401 (gate BEFORE body
+  //    parsing), with the correct token -> 200 and indexed answers;
+  //  - /api/admin/* (docs/stats/logs/upload/delete) needs NO token at all —
+  //    assertAdmin is a no-op when adminToken is empty, so chat gating must not
+  //    leak onto the admin surface;
+  //  - health/domains stay public as always.
+  const chat = (auth) =>
+    new Promise((resolve, reject) => {
+      const data = JSON.stringify({ query: '诊所几点开门' });
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/chat',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(data),
+            ...(auth ? { Authorization: `Bearer ${auth}` } : {}),
+          },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out || '{}') }));
+        }
+      );
+      req.on('error', reject);
+      req.write(data);
+      req.end();
+    });
+  try {
+    await kb.ingestBuffer('clinic.md', Buffer.from('诊所工作时间：周一至周六 8:00-18:00，周日休息。'));
+
+    // chat gate: no token and wrong token are both the exact 401; the correct
+    // token answers (so the 401 is about auth, not the payload).
+    const none = await chat();
+    assert.strictEqual(none.status, 401);
+    assert.deepStrictEqual(none.body, { error: 'unauthorized' }, 'missing Bearer on gated chat is the exact 401');
+
+    const wrong = await chat('wrongTok');
+    assert.strictEqual(wrong.status, 401);
+    assert.deepStrictEqual(wrong.body, { error: 'unauthorized' }, 'wrong Bearer is the exact 401');
+
+    const good = await chat('onlyChat');
+    assert.strictEqual(good.status, 200, 'correct Bearer opens /api/chat');
+    assert.ok(good.body.citations.length >= 1, 'gated-but-authenticated chat still answers from the index');
+    assert.strictEqual(good.body.top.document, 'clinic.md');
+
+    // admin area: every route is open without any token when admin is unset.
+    const docs = await get(`http://localhost:${port}/api/admin/docs`);
+    assert.strictEqual(docs.status, 200, 'docs list needs no token when only chat is gated');
+    assert.strictEqual(docs.body.docs.length, 1);
+    assert.strictEqual((await get(`http://localhost:${port}/api/admin/stats`)).status, 200);
+    assert.strictEqual((await get(`http://localhost:${port}/api/admin/logs`)).status, 200);
+
+    // admin write path open too: delete then re-upload works without a token.
+    const delRes = await new Promise((resolve, reject) => {
+      http
+        .request({ host: 'localhost', port, path: '/api/admin/docs/1', method: 'DELETE' }, (r) => {
+          r.resume();
+          r.on('end', () => resolve(r.statusCode));
+        })
+        .on('error', reject)
+        .end();
+    });
+    assert.strictEqual(delRes, 200, 'admin delete needs no token when only chat is gated');
+    assert.deepStrictEqual(await kb.getAllDocs(), [], 'delete took effect without a token');
+
+    const boundary = '----rd-chatonly';
+    const content = Buffer.from('关于采购代理服务的招标公告，投标截止时间为下月十五日。');
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="tender.md"\r\nContent-Type: text/markdown\r\n\r\n`),
+      content,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    const up = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/admin/upload',
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out) }));
+        }
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+    assert.strictEqual(up.status, 200, 'admin upload needs no token when only chat is gated');
+    assert.strictEqual(up.body.results[0].action, 'indexed');
+
+    // public surfaces stay public.
+    assert.strictEqual((await get(`http://localhost:${port}/api/health`)).status, 200);
+    assert.strictEqual((await get(`http://localhost:${port}/api/domains`)).status, 200);
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin upload with no files returns a stable JSON 400', async () => {
   const { kb, server, port } = await startServer();
   // POST with no multipart body at all
