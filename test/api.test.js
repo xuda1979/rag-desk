@@ -1351,6 +1351,37 @@ test('/api/chat honors a valid limit (citations capped by the requested count)',
   kb.close();
 });
 
+test('/api/chat limit: Number() coercion governs — floors fractions, accepts numeric strings, falsy to default', async () => {
+  const { kb, server, port } = await startServer();
+  // safeLimit() runs Math.floor(Number(v)): a fractional limit floors toward
+  // the citation cap, a numeric string IS a valid limit (URL/query clients send
+  // strings), JSON booleans coerce (true->1, false->0->default), and empty/
+  // null/whitespace-laden strings fall back to the default of 3. Locking the
+  // coercion theorem end-to-end so a tightening to typeof checks stays visible.
+  try {
+    for (let i = 1; i <= 6; i++) {
+      await kb.ingestBuffer(`d${i}.md`, Buffer.from(`咨询费收取规则第${i}条：按小时计费并开具发票。`));
+    }
+    const citeCount = async (limit) => {
+      const res = await post(`http://localhost:${port}/api/chat`, { query: '咨询费怎么收', limit });
+      assert.strictEqual(res.status, 200, `limit ${JSON.stringify(limit)} must not 500`);
+      return res.body.citations.length;
+    };
+    assert.strictEqual(await citeCount(2.9), 2, 'fractional limit must floor to 2');
+    assert.strictEqual(await citeCount('2'), 2, 'numeric string must be a valid limit');
+    assert.strictEqual(await citeCount('2.9'), 2, 'fractional numeric string must floor like a number');
+    assert.strictEqual(await citeCount('  3  '), 3, 'whitespace-padded numeric string must trim to 3');
+    assert.strictEqual(await citeCount(true), 1, 'true coerces to 1 via Number(true)');
+    assert.strictEqual(await citeCount(false), 3, 'false coerces to 0 and falls back to the default');
+    assert.strictEqual(await citeCount(''), 3, 'empty string is NaN -> default');
+    assert.strictEqual(await citeCount(null), 3, 'null is 0 -> default');
+    assert.strictEqual(await citeCount('0'), 3, 'string "0" fails the >=1 guard -> default');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/chat clamps a huge limit to the 1000-citation ceiling', async () => {
   const { kb, server, port } = await startServer();
   // The same safeLimit() that gates /api/admin/logs also caps the chat side;
