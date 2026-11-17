@@ -1355,6 +1355,39 @@ test('demo page wiring: chat body shape, error surfacing, domains auto-sync and 
   }
 });
 
+test('admin page wiring: auto-sync boot, token-gated retry, error surfacing and per-file upload results', async () => {
+  const { kb, server, port } = await startServer();
+  // admin.js is the admin page's only client logic and now the last of the
+  // three client scripts without a source-level wiring lock (demo.js locked at
+  // a04adbf, widget.js earlier); a rewire that silently breaks the panel must
+  // stay visible. Lock the source contracts the admin wire tests depend on.
+  try {
+    const res = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(res.status, 200);
+    // boots by loading docs and logs; the docs load also renders the stats card
+    assert.match(res.body, /loadDocs\(\)/, 'admin.js must boot the docs list');
+    assert.match(res.body, /loadLogs\(\)/, 'admin.js must boot the logs list');
+    // token gate: one 401 retry after a single prompt, with no re-prompt loop
+    assert.ok(res.body.includes("prompt('该后台需要访问令牌（RAGDESK_ADMIN_TOKEN），请输入：')"), 'token gate must prompt like a file upload');
+    assert.match(res.body, /if \(res\.status === 401 && !retried\)/, '401 must trigger exactly one retry');
+    assert.ok(res.body.includes('return adminFetch(url, opts, true); // retry once; a still-401 response surfaces as an error, no re-prompt loop'), 'admin.js must document the no-re-prompt-loop contract');
+    // upload posts multipart FormData and renders per-file indexed/duplicate/error
+    // results exactly as the wire tests lock on /api/admin/upload
+    assert.match(res.body, /new FormData\(\)/, 'upload must collect files into FormData');
+    assert.ok(res.body.includes("fd.append('files', f)"), 'upload must append files under the files field');
+    assert.ok(res.body.includes("if (r.action === 'indexed') return `${r.filename}: 已索引（${r.chunks} 分块）`;"), 'indexed results must render chunk count');
+    assert.ok(res.body.includes("if (r.action === 'duplicate') return `${r.filename}: 内容已存在，跳过`;"), 'duplicate results must render the skip reason');
+    assert.ok(res.body.includes("if (r.action === 'error') return `${r.filename}: 失败 — ${r.error || '未知错误'}`;"), 'error results must surface the failure reason');
+    // docs/logs rows surface server errors with HTTP status instead of blank rows
+    assert.ok(res.body.includes('加载失败（HTTP ${res.status}）：${esc(data.error || \'服务器未返回错误详情\')}'), 'admin.js must surface docs/logs load errors with status');
+    // every field interpolated into rows is HTML-escaped before innerHTML
+    assert.match(res.body, /replace\(\/\[&<>"']\/g/, 'admin.js must escape HTML metacharacters before innerHTML');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('CORS preflight passes without credentials even when endpoint auth is on', async () => {
   const { kb, server, port } = await startServer({ adminToken: 'adm', chatToken: 'ch0' });
   // browsers always send the preflight before the credentialed request; a
