@@ -38,13 +38,14 @@ function buildApp(kb, opts = {}) {
   const allowOrigin = opts.allowOrigin || process.env.RAGDESK_ALLOW_ORIGIN || '';
 
   const app = express();
-  app.use(express.json({ limit: '2mb' }));
-  app.use(express.urlencoded({ extended: false }));
 
   // CORS for the embeddable widget: when RAGDESK_ALLOW_ORIGIN is set it is
   // reflected; otherwise a permissive default lets customer pages call the
   // chat API cross-origin (chat is the public-facing surface; admin stays
-  // same-origin and additionally token-gated when configured).
+  // same-origin and additionally token-gated when configured). Runs BEFORE the
+  // body parsers so a rejected request still carries the headers: an oversized
+  // JSON body errors in express.json and otherwise skips this middleware,
+  // leaving the browser to mask the readable 413 as a CORS network failure.
   app.use((req, res, next) => {
     const origin = req.get('origin');
     if (!origin) return next();
@@ -54,6 +55,9 @@ function buildApp(kb, opts = {}) {
     if (req.method === 'OPTIONS') return res.status(204).end();
     next();
   });
+
+  app.use(express.json({ limit: '2mb' }));
+  app.use(express.urlencoded({ extended: false }));
 
   // ---------------------------------------------------------------- auth
   // Admin endpoints are only protected when RAGDESK_ADMIN_TOKEN is set

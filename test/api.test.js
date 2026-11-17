@@ -2337,6 +2337,55 @@ test('CORS headers ride on error responses too (401/404 stay cross-origin readab
   }
 });
 
+test('CORS headers ride on the 413 oversized-body error too (body parsers run after CORS)', async () => {
+  const { kb, server, port } = await startServer();
+  // express.json() caps the body at 2mb, so the 413 comes out of the body
+  // parser BEFORE the route. If the CORS middleware sat after it, a browser
+  // widget posting an oversized payload would get a header-less 413 and the
+  // browser would mask the readable JSON as a CORS network failure. Lock that
+  // the rejected request still reflects the Origin with the full CORS set.
+  try {
+    const huge = JSON.stringify({ query: 'x'.repeat(2 * 1024 * 1024 + 100) });
+    const res = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/chat',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(huge),
+            Origin: 'https://widget.example',
+          },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () =>
+            resolve({
+              status: r.statusCode,
+              allowOrigin: r.headers['access-control-allow-origin'],
+              allowMethods: r.headers['access-control-allow-methods'],
+              body: JSON.parse(out),
+            })
+          );
+        }
+      );
+      req.on('error', reject);
+      req.write(huge);
+      req.end();
+    });
+    assert.strictEqual(res.status, 413, 'oversized JSON body must 413');
+    assert.match(res.body.error, /request body too large/);
+    assert.strictEqual(res.allowOrigin, 'https://widget.example', '413 must stay cross-origin readable');
+    assert.strictEqual(res.allowMethods, 'GET,POST,DELETE,OPTIONS');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('CORS wildcard allow-origin is returned on error responses too', async () => {
   const { kb, server, port } = await startServer({ allowOrigin: '*' });
   // with RAGDESK_ALLOW_ORIGIN=* every response (not just preflight) returns the
