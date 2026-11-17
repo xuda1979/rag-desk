@@ -1319,6 +1319,42 @@ test('static page script boot: demo.js/admin.js serve as JS and pages srce them 
   }
 });
 
+test('demo page wiring: chat body shape, error surfacing, domains auto-sync and XSS escape', async () => {
+  const { kb, server, port } = await startServer();
+  // demo.js is the demo page's only client logic (widget.js has three source
+  // wiring suites, demo.js none); a rewire that silently breaks the demo must
+  // stay visible. Lock the source-level contracts the wire tests depend on:
+  // chat body shape, error surfacing, /api/domains sync guard, HTML escaping
+  // and the render fields drawn from /api/chat.
+  try {
+    const res = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(res.status, 200);
+    // the demo submits the exact { query, domain } body /api/chat validates; a
+    // rewire would silently stop honoring the selected domain preset.
+    assert.match(res.body, /JSON\.stringify\(\{ query: q, domain: domainSelect\.value \}\)/);
+    // non-ok responses surface the server error (with HTTP status), network
+    // failures surface 检索失败 with the escaped reason — never blank/garbage.
+    assert.ok(res.body.includes('请求失败（HTTP ${res.status}）：${esc((data && data.error) || \'服务器未返回错误详情\')}'), 'demo.js must surface server errors with status');
+    assert.ok(res.body.includes('检索失败：${esc(err.message)}'), 'demo.js must surface network failures with the reason');
+    // /api/domains auto-sync replaces the in-page FALLBACK presets; the guard
+    // keeps a malformed/empty payload from wiping the select options.
+    assert.match(res.body, /fetch\('\/api\/domains'\)/);
+    assert.ok(res.body.includes('if (!Array.isArray(data.domains) || !data.domains.length) return;'), 'domains sync must guard non-array/empty payloads');
+    assert.ok(res.body.includes('map[d.id] = { greeting: d.greeting, examples: d.examples || [] };'), 'domains sync must build the preset map');
+    // every field interpolated into bot messages is HTML-escaped before innerHTML
+    assert.match(res.body, /replace\(\/\[&<>"']\/g/, 'demo.js must escape HTML metacharacters before innerHTML');
+    // renderBotMessage draws answer/citation/confidence/mode from the /api/chat
+    // payload — the same fields the wire tests lock on the endpoint.
+    assert.ok(res.body.includes("esc(data.answer).replace(/\\n/g, '<br>')"), 'answer must render newlines as <br>');
+    assert.ok(res.body.includes('esc(c.document)}</span> §${c.paragraph}：${ex}'), 'citations must render document §paragraph: excerpt');
+    assert.ok(res.body.includes('Math.round((data.confidence || 0) * 100)}%'), 'confidence must render as a percentage');
+    assert.match(res.body, /'offline-retrieval' \? '离线检索' : '检索\+LLM'/, 'mode must render offline-retrieval distinctly');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('CORS preflight passes without credentials even when endpoint auth is on', async () => {
   const { kb, server, port } = await startServer({ adminToken: 'adm', chatToken: 'ch0' });
   // browsers always send the preflight before the credentialed request; a
