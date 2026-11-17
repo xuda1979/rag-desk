@@ -133,6 +133,45 @@ test('server-side: /api/chat rejects whitespace-only queries and trims padded on
   }
 });
 
+test('server-side: /api/chat is FTS-safe on the wire — punctuation-laden queries hit, pure-noise queries miss gracefully', async () => {
+  const { kb, server, port } = await startServer();
+  // Unit tests pin searchRaw() against quotes/noise; this locks the SAME
+  // contract through the route. Quotes/parens/question marks are tokenizer
+  // delimiters (never FTS5 MATCH syntax), so a quoted CJK query must hit; a
+  // query that is ALL punctuation tokenizes to nothing (toQuery -> '' ->
+  // empty retrieval), and the route must answer the stable domain fallback
+  // miss — never a 400/500. The body is fully deterministic, so it is locked
+  // verbatim (same literal shape the full-payload test asserts).
+  try {
+    await kb.ingestBuffer('p.md', Buffer.from('合同纠纷在被告住所地人民法院起诉，诉讼时效三年。客服电话 400-123-4567。'));
+
+    const quoted = await post(`http://localhost:${port}/api/chat`, { query: '"合同纠纷"' });
+    assert.strictEqual(quoted.status, 200, 'a quoted CJK query must be answered, not rejected');
+    assert.strictEqual(quoted.body.top.document, 'p.md', 'quotes must be stripped to tokenizer terms, not FTS syntax');
+    assert.ok(quoted.body.citations.length >= 1);
+    assert.ok(quoted.body.answer.includes(quoted.body.citations[0].excerpt));
+
+    const punct = await post(`http://localhost:${port}/api/chat`, { query: '截止时间???' });
+    assert.strictEqual(punct.status, 200, 'trailing punctuation must not 500 the route');
+
+    const noise = await post(`http://localhost:${port}/api/chat`, { query: '***' });
+    assert.strictEqual(noise.status, 200, 'an all-punctuation query is a graceful miss, not an error');
+    assert.deepStrictEqual(noise.body, {
+      answer: '抱歉，知识库中没有找到相关内容。',
+      mode: 'offline-retrieval',
+      llm: false,
+      domain: 'general',
+      confidence: 0,
+      citations: [],
+      top: null,
+      query: '***',
+    }, 'pure-noise query returns the exact stable fallback miss');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('server-side: /api/chat coerces non-string queries and 400s falsy ones', async () => {
   const { kb, server, port } = await startServer();
   // JSON clients may send numbers/bools for query; the guard tests the raw
