@@ -2475,6 +2475,38 @@ test('admin.js token gate client-side: the token lives in localStorage under rag
   }
 });
 
+test('widget.js mounts the FAB and panel as appended DOM nodes with stable ids the injected CSS selects on, and closes the panel on the X', async () => {
+  const { kb, server, port } = await startServer();
+  // The self-contained-embed test locks the style injection and panel chrome;
+  // this one locks the MOUNTING side: the FAB and panel are real elements with
+  // the ids the injected '#ragdesk-*' rules select on, both appended to
+  // document.body (not a shadow root the host page cannot see), and the close
+  // button binds a handler that removes .open so the FAB toggle stays symmetric.
+  try {
+    const res = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(res.status, 200);
+    // the injected stylesheet targets #ragdesk-* ids, so the mounted elements
+    // must carry those exact ids or the embed renders unstyled
+    assert.ok(res.body.includes("fab.id = 'ragdesk-fab';"), 'the FAB must carry the id the injected #ragdesk-fab rule selects on');
+    assert.ok(res.body.includes("panel.id = 'ragdesk-panel';"), 'the panel must carry the id the injected #ragdesk-panel rule selects on');
+    // the FAB is a real button (clickable) appended into the host body
+    assert.ok(res.body.includes("var fab = document.createElement('button');"), 'the FAB must be a real button element');
+    assert.ok(res.body.includes('document.body.appendChild(fab);'), 'the FAB must be appended into the host page body');
+    // the panel is a div appended after the FAB so it overlays on top
+    assert.ok(res.body.includes("var panel = document.createElement('div');"), 'the panel must be a real div element');
+    assert.ok(res.body.includes('document.body.appendChild(panel);'), 'the panel must be appended into the host page body');
+    // the css array body must end joined by \n so the injected rule set is a
+    // single valid stylesheet the browser parses wholesale
+    assert.ok(res.body.includes('].join(\'\\n\')'), 'the css rules must be joined into one stylesheet text');
+    // the close button binds a handler that removes .open — clicked X must
+    // close the panel, balancing the FAB click that toggles it open
+    assert.ok(res.body.includes("panel.classList.remove('open');"), 'the close button must remove the open state');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js esc() null-coerces and maps all five HTML metacharacters; addMsg appends each bubble as a div and returns it for in-place patching', async () => {
   const { kb, server, port } = await startServer();
   // The demo's only defense against HTML injection from fetched answers and
