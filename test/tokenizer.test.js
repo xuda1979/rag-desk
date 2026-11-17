@@ -21,6 +21,11 @@ test('normalize lowercases latin, collapses whitespace, trims', () => {
   assert.strictEqual(normalize(''), '');
 });
 
+test('normalize coerces null/undefined to empty text', () => {
+  assert.strictEqual(normalize(null), '');
+  assert.strictEqual(normalize(undefined), '');
+});
+
 test('ngrams: overlapping bigrams; single char kept whole', () => {
   assert.deepStrictEqual(ngrams('律师咨询费', 2), ['律师', '师咨', '咨询', '询费']);
   assert.deepStrictEqual(ngrams('律', 2), ['律']);
@@ -43,6 +48,21 @@ test('toQuery: punctuation-only input yields empty query, never throws', () => {
   assert.strictEqual(toQuery('***'), '');
   assert.strictEqual(toQuery('??'), '');
   assert.strictEqual(toQuery('"合同纠纷"'), '("合同" OR "同纠" OR "纠纷")');
+});
+
+test('toQuery: CJK/ascii runs adjacent without delimiters split at the boundary', () => {
+  assert.strictEqual(toQuery('律400'), '"律" "400"');
+  assert.strictEqual(toQuery('律师400电话预约'), '("律师") "400" ("电话" OR "话预" OR "预约")');
+  assert.strictEqual(toQuery('疫苗2月'), '("疫苗") "2" "月"');
+});
+
+test('expandForIndex splits adjacent CJK/ascii runs at the boundary', () => {
+  assert.deepStrictEqual(expandForIndex('法律咨询400'), ['法律', '律咨', '咨询', '400']);
+});
+
+test('toQuery: single Han character stays a bare quoted token, never erased', () => {
+  assert.strictEqual(toQuery('月'), '"月"');
+  assert.strictEqual(toQuery('疫苗 月'), '("疫苗") "月"');
 });
 
 test('expandForIndex flattens CJK to bigrams and keeps ascii words', () => {
