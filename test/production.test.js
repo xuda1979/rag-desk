@@ -969,6 +969,67 @@ test("prod: README 嵌入浮窗 snippet's data-* vocabulary matches widget.js re
   assert.match(readme, /data-token Bearer 令牌/, 'README 覆盖 list must advertise the data-token Bearer footprint');
 });
 
+test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offline default, single-tenant) hold in the implementation', () => {
+  // SPEC.md is the design source for the software-copyright submission: its
+  // 功能需求 / AC blocks describe what the product must do. A design that the
+  // binary denies is a spec drift — lock every testable claim to the source
+  // that realises it, so a later rewrite that drops a documented mode or
+  // format fails here instead of silently shipping a narrower product.
+  const spec = fs.readFileSync(path.join(__dirname, '..', 'SPEC.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const chunkerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'chunker.js'), 'utf8');
+  const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+  const { fileKind } = require('../src/lib/extractors');
+  const { DOMAINS } = require('../src/lib/domains');
+  const { chunkText } = require('../src/lib/chunker');
+
+  // ---- 功能需求: intake formats listed are exactly the ones fileKind serves
+  // path.extname('.md') is '' (dotfile rule), so fileKind must be fed real filenames
+  const fileKinds = ['doc.md', 'doc.markdown', 'doc.txt', 'doc.csv', 'doc.pdf', 'doc.docx'].map((e) => fileKind(e));
+  assert.deepEqual(fileKinds, ['markdown', 'markdown', 'text', 'csv', 'pdf', 'docx'],
+    'SPEC intake formats (Markdown/PDF/DOCX/纯文本/CSV) must be exactly what fileKind serves');
+  assert.ok(spec.includes('Markdown / PDF / DOCX / 纯文本 / CSV'), 'SPEC must list the intake formats');
+
+  // ---- 功能需求: 400-char window with 40-char overlap is the chunker default
+  assert.match(chunkerSrc, /window \|\| 400/, 'chunker default window must be 400 chars (SPEC 分块)');
+  assert.match(chunkerSrc, /overlap \?\? 40/, 'chunker default overlap must be 40 chars (SPEC 重叠)');
+  const chunks = chunkText('甲'.repeat(900));
+  assert.ok(chunks.length > 2 && chunks[0].text.length <= 400, '400-char window must actually split a 900-char run');
+
+  // ---- 功能需求: FTS5 + BM25 retrieval, single-tenant local SQLite
+  assert.match(storageSrc, /CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5/, 'retrieval must stay on local SQLite FTS5');
+  assert.match(storageSrc, /bm25\(fts\) AS score/, 'ranking must stay BM25 over the FTS index');
+  assert.match(storageSrc, /tokenize='unicode61'/, 'FTS tokenizer must stay unicode61');
+
+  // ---- 领域壳: every SPEC-listed preset exists and has the documented template fields
+  for (const id of ['legal', 'medical', 'procurement', 'general']) {
+    const d = DOMAINS[id];
+    assert.ok(d, `SPEC preset domain ${id} must exist`);
+    assert.ok(typeof d.systemPrompt === 'string' && d.systemPrompt, `${id} must carry a systemPrompt template`);
+    assert.ok(typeof d.lead === 'string' && typeof d.fallback === 'string', `${id} must carry lead/fallback wording`);
+  }
+
+  // ---- AC: citations are (source document + paragraph number) on the wire
+  assert.match(kbSrc, /document: c\.filename/, 'citations must name the source document');
+  assert.match(kbSrc, /paragraph: c\.chunkIndex/, 'citations must carry the paragraph/chunk number');
+
+  // ---- AC: offline (no LLM/embedding) answer path with 原文片段 + 置信度
+  assert.match(kbSrc, /mode: 'offline-retrieval'/, 'offline answer mode must exist (SPEC 离线模式)');
+  assert.match(kbSrc, /llm: false/, 'LLM must default off (SPEC LLM 默认关闭)');
+  assert.match(kbSrc, /answer: answerText/, 'offline answers must be rule-generated from retrieval (SPEC 检索 + 规则)');
+
+  // ---- 非目标: single-tenant is not a storage abstraction — no customer_id anywhere
+  assert.doesNotMatch(storageSrc, /customer_id|tenant_id/, 'SPEC 非目标 single-tenant must hold in storage');
+
+  // ---- AC: an embedded chat widget + API endpoint (README 嵌入浮窗 lock covers the snippet)
+  assert.ok(spec.includes('嵌入式聊天浮窗'), 'SPEC must promise the embeddable chat widget');
+  assert.ok(spec.includes('API endpoint'), 'SPEC must promise the API endpoint');
+
+  // ---- AC: no external API dependency in the offline path — src/ has no HTTP client
+  assert.doesNotMatch(appSrc, /require\(['"](node:)?https?['"]\)/, 'src/app.js must not call external services');
+});
+
 test('prod: README.md documents the exact API, env, limits, response shape and embed surface the code serves', () => {
   // README.md is the operational contract fed into the software-copyright
   // submission: its route table, env table, upload limits and chat response
