@@ -359,6 +359,36 @@ test('server-side: /api/chat coerces non-string domain values to general instead
   }
 });
 
+test('server-side: /api/chat domain ids match exactly — no trim, no case-fold; empty/whitespace degrade to general', async () => {
+  const { kb, server, port } = await startServer();
+  // The coercion test above locks JSON-type degradation; this one pins the
+  // LOOKUP semantics: getDomain(id) is an exact-match on the preset id. A
+  // "friendlier" client sending "legal "/"LEGAL" must NOT be silently mapped —
+  // the demo page sends domainSelect.value verbatim and relies on the echo, so
+  // any future trim/lowercase normalization would change the wire contract.
+  // Empty corpus + ASCII query = deterministic miss so the domain id and its
+  // stringified value are the only variables.
+  try {
+    const degrade = async (domain, note) => {
+      const res = await post(`http://localhost:${port}/api/chat`, { query: 'qqqzzz xxx', domain });
+      assert.strictEqual(res.status, 200, note);
+      assert.strictEqual(res.body.domain, 'general', `${note}: echoed id must degrade to general`);
+      assert.strictEqual(res.body.answer, '抱歉，知识库中没有找到相关内容。', `${note}: must phrase with the general fallback`);
+    };
+    // whitespace variants prove the id lookup does not trim
+    await degrade('', 'empty-string domain must degrade to general');
+    await degrade('   ', 'whitespace-only domain must degrade to general');
+    await degrade('legal ', 'trailing-space domain must not be trimmed to legal');
+    await degrade(' LEGAL', 'leading-space mixed-case must not match legal');
+    // a multi-element array String()-coerces to "legal,general" -> no preset
+    await degrade(['legal', 'general'], 'multi-element array must degrade (String() join is not a preset id)');
+    await degrade(42, 'number 42 must degrade to general');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('server-side: a valid domain selection is honored in the answer phrasing on the wire', async () => {
   const { kb, server, port } = await startServer();
   // demo.js always sends domainSelect.value (default 'general') with every
