@@ -313,6 +313,63 @@ test('server-side: /api/chat accepts x-www-form-urlencoded bodies (urlencoded mi
   }
 });
 
+test('non-JSON or absent Content-Type bodies never reach the parser — /api/chat 400s query-is-required instead of reading a false body', async () => {
+  const { kb, server, port } = await startServer();
+  // Nothing parses body bytes without a JSON/urlencoded Content-Type (express
+  // only feeds req.body for the parsers it has registered). A client that posts
+  // raw bytes or forgets the header must therefore 400 on the handler's own
+  // check rather than silently answering with query from an unpiped buffer; a
+  // rewire of the parsers must keep req.body undefined for these, not start
+  // scraping text/plain into it.
+  const sendRaw = (contentType, bytes) =>
+    new Promise((resolve, reject) => {
+      const u = new URL(`http://localhost:${port}/api/chat`);
+      const headers = { 'Content-Length': bytes.length };
+      if (contentType !== null) headers['Content-Type'] = contentType;
+      const req = http.request(
+        { host: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers },
+        (res) => {
+          let out = '';
+          res.on('data', (c) => (out += c));
+          res.on('end', () => resolve({ status: res.statusCode, ct: res.headers['content-type'], body: out }));
+        }
+      );
+      req.on('error', reject);
+      req.write(bytes);
+      req.end();
+    });
+  try {
+    await kb.ingestBuffer('legal.md', Buffer.from('律师咨询费按每小时 300 元收取，首次咨询免费。'));
+    const jsonBytes = Buffer.from('{"query":"咨询费怎么收"}');
+    const formBytes = Buffer.from('query=%E5%92%A8%E8%AF%A2%E8%B4%B9%E6%80%8E%E4%B9%88%E6%94%B6');
+
+    // no Content-Type header at all: body stays unparsed, handler sees no query
+    const noCt = await sendRaw(null, jsonBytes);
+    assert.strictEqual(noCt.status, 400);
+    assert.deepStrictEqual(JSON.parse(noCt.body), { error: 'query is required' });
+    assert.match(noCt.ct, /^application\/json/, 'the handler 400 must itself be JSON');
+
+    // text/plain with JSON-looking bytes: same unparsed 400, never a 200 answer
+    const plainJson = await sendRaw('text/plain', jsonBytes);
+    assert.strictEqual(plainJson.status, 400);
+    assert.deepStrictEqual(JSON.parse(plainJson.body), { error: 'query is required' });
+
+    // text/plain with urlencoded-looking bytes: also unparsed, same 400
+    const plainForm = await sendRaw('text/plain', formBytes);
+    assert.strictEqual(plainForm.status, 400);
+    assert.deepStrictEqual(JSON.parse(plainForm.body), { error: 'query is required' });
+
+    // control: the same query under the real JSON content type answers fine
+    const ctrl = await post(`http://localhost:${port}/api/chat`, { query: '咨询费怎么收' });
+    assert.strictEqual(ctrl.status, 200);
+    assert.strictEqual(ctrl.body.query, '咨询费怎么收');
+    assert.ok(ctrl.body.citations.length > 0, 'control JSON query must hit the ingested doc');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('server-side: unknown domain falls back to general preset', async () => {
   const { kb, server, port } = await startServer();
   const unknown = await post(`http://localhost:${port}/api/chat`, { query: 'xyz', domain: 'slackbot' });
