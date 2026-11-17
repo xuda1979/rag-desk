@@ -2283,6 +2283,46 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('demo.js citation rendering: excerpt falls back to an empty string and is capped at 160 chars, and only cap-eligible citations compose the line', async () => {
+  const { kb, server, port } = await startServer();
+  // The wire tests lock /api/chat's excerpt field (a non-empty string) and the
+  // render contract test locks the §paragraph:ex interpolation. Still unpinned
+  // is the client-side cap itself: an excerpt is defensive-truncated to 160
+  // chars before interpolation so a long paragraph cannot balloon the bubble,
+  // and the || '' fallback keeps a citation with a missing excerpt from
+  // rendering "undefined". The .map body must produce the exact line joined
+  // straight into the answer block.
+  try {
+    const res = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(res.status, 200);
+    // the excerpt is read with a '' fallback and sliced to 160 chars — a
+    // rewire that dropped the cap (or the fallback) would either balloon the
+    // message area or print literal "undefined"
+    assert.ok(
+      res.body.includes("const ex = esc(c.excerpt || '').slice(0, 160);"),
+      'demo must fall back to "" and cap the citation excerpt at 160 chars'
+    );
+    // the citation line is composed only from the capped excerpt — the cap
+    // above must feed the §paragraph:ex interpolation, not a fresh/uncapped
+    // read of the payload field
+    assert.match(
+      res.body,
+      /const ex = esc\(c\.excerpt \|\| ''\)\.slice\(0, 160\);\n\s+return `<span class="bot-cite"><span class="cite-doc">\$\{esc\(c\.document\)\}<\/span> §\$\{c\.paragraph\}：\$\{ex\}<\/span>`;/,
+      'the capped excerpt must feed the citation line interpolation'
+    );
+    // the joined citation block is appended after the bot-meta block, so the
+    // whole rendered bubble is answer + meta + citations in one string
+    assert.match(
+      res.body,
+      /\)\n      \.join\(''\);/,
+      'citations must be joined into one contiguous block'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('widget.js request construction: JSON content-type base headers, Authorization only behind the token guard, and the POST call shape', async () => {
   const { kb, server, port } = await startServer();
   // The chat-token test locks that the data-token attribute is read and that
