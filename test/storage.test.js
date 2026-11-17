@@ -175,3 +175,29 @@ test('storage: settings upsert is idempotent per key', () => {
   assert.strictEqual(st.getSetting('missing', 'dflt'), 'dflt');
   st.close();
 });
+
+test('storage: an orphan FTS row with no chunks row still surfaces via search — meta falls back to {} instead of throwing', () => {
+  const { st } = tempStorage();
+  const docId = st.insertDoc({ filename: 'a.md', kind: 'markdown', mime: null, size: 30, sha256: 'zz1' });
+  st.insertChunks(docId, [{ index: 1, text: '律师咨询费按每小时 300 元收取。' }]);
+  // A rowid that has no chunks row (a chunk whose fts row outlived it, or a
+  // direct fts insert) must exercise search()'s `getChunk.get(...) || {}`
+  // fallback: the row is still returned, just without doc metadata.
+  st.db.prepare('INSERT INTO fts (rowid, tokens, orig) VALUES (?,?,?)').run(999999, '律师', '孤儿文本');
+  const r = st.search('律师', 5);
+  assert.strictEqual(r.chunks.length, 2, 'both the real chunk and the orphan fts row match');
+  const orphan = r.chunks.find((c) => c.chunkId === 999999);
+  assert.ok(orphan, 'the orphan fts row is returned');
+  assert.strictEqual(orphan.body, '孤儿文本', 'fts orig text is passed through unchanged');
+  assert.strictEqual(orphan.chunkIndex, undefined, 'no chunks row -> meta {} leaves chunk_index undefined');
+  assert.strictEqual(orphan.docId, undefined, 'no chunks row -> meta {} leaves doc_id undefined');
+  assert.strictEqual(orphan.filename, undefined, 'no join means no filename enrichment');
+  assert.ok(r.docScores.has(undefined), 'the orphan (undefined doc) still contributes its score');
+  st.close();
+});
+
+test('storage: close() is idempotent — a second close is swallowed, never throws', () => {
+  const { st } = tempStorage();
+  st.close();
+  assert.doesNotThrow(() => st.close(), 'double close must not throw (the catch arm swallows "database is not open")');
+});
