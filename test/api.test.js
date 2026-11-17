@@ -2044,6 +2044,45 @@ test('/api/domains returns preset domains with labels and example questions', as
   }
 });
 
+test('/api/domains body is exactly { domains } exposing only the four public fields per preset', async () => {
+  const { kb, server, port } = await startServer();
+  // chat/docs/logs/stats all have whole-body locks; /api/domains is the last
+  // public endpoint without one. demo.js reads only id/label/greeting/examples,
+  // so the response must NOT leak engine-internal preset fields
+  // (fallback/lead/footer/systemPrompt) onto the public wire, and the four
+  // presets must arrive in preset-definition order (legal/medical/procurement/
+  // general) matching the select dropdown demo.js builds.
+  try {
+    const res = await get(`http://localhost:${port}/api/domains`);
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(Object.keys(res.body), ['domains'], 'body must be exactly { domains }, nothing else');
+    assert.deepStrictEqual(
+      res.body.domains.map((d) => Object.keys(d).sort()),
+      [
+        ['examples', 'greeting', 'id', 'label'].sort(),
+        ['examples', 'greeting', 'id', 'label'].sort(),
+        ['examples', 'greeting', 'id', 'label'].sort(),
+        ['examples', 'greeting', 'id', 'label'].sort(),
+      ],
+      'each preset row exposes exactly id/label/greeting/examples — no internal fields leak'
+    );
+    assert.deepStrictEqual(
+      res.body.domains.map((d) => d.id),
+      ['legal', 'medical', 'procurement', 'general'],
+      'presets arrive in source definition order'
+    );
+
+    // presets are static config: a chat under the same domain must not change
+    // what /api/domains exposes
+    await post(`http://localhost:${port}/api/chat`, { query: '几点开门', domain: 'medical' });
+    const again = await get(`http://localhost:${port}/api/domains`);
+    assert.deepStrictEqual(again.body, res.body, 'presets are stable and identical after a chat');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/admin/stats reports total and matched query counts', async () => {
   const { kb, server, port } = await startServer();
   const before = await get(`http://localhost:${port}/api/admin/stats`);
