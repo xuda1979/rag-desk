@@ -159,6 +159,66 @@ test('server-side: /api/chat coerces non-string queries and 400s falsy ones', as
   }
 });
 
+test('server-side: /api/chat accepts x-www-form-urlencoded bodies (urlencoded middleware)', async () => {
+  // express.urlencoded({ extended: false }) is a common consumer-client
+  // encoding (plain form posts); the chat route must parse it exactly like
+  // JSON: valid queries answered, blank/empty exact 400s, domain honored.
+  const { kb, server, port } = await startServer();
+  const form = (payload) =>
+    new Promise((resolve, reject) => {
+      const u = new URL(`http://localhost:${port}/api/chat`);
+      const data = Object.entries(payload)
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join('&');
+      const req = http.request(
+        {
+          host: u.hostname,
+          port: u.port,
+          path: u.pathname,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        },
+        (res) => {
+          let out = '';
+          res.on('data', (c) => (out += c));
+          res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(out || '{}') }));
+        }
+      );
+      req.on('error', reject);
+      req.write(data);
+      req.end();
+    });
+  try {
+    await kb.ingestBuffer('legal.md', Buffer.from('律师咨询费按每小时 300 元收取，首次咨询免费。'));
+
+    // valid urlencoded query is answered exactly like a JSON one
+    const ok = await form({ query: '咨询费怎么收' });
+    assert.strictEqual(ok.status, 200);
+    assert.strictEqual(ok.body.query, '咨询费怎么收');
+    assert.ok(ok.body.citations.length > 0, 'urlencoded query must hit the ingested doc');
+    assert.match(ok.body.answer, /300/);
+
+    // blank urlencoded query -> the exact shared blank-query 400
+    const blank = await form({ query: '   ' });
+    assert.strictEqual(blank.status, 400);
+    assert.deepStrictEqual(blank.body, { error: 'query is required' });
+
+    // empty urlencoded body (no fields at all) -> same exact 400
+    const empty = await form({});
+    assert.strictEqual(empty.status, 400);
+    assert.deepStrictEqual(empty.body, { error: 'query is required' });
+
+    // domain field is honored through the urlencoded parser too
+    const selected = await form({ query: '咨询费怎么收', domain: 'legal' });
+    assert.strictEqual(selected.status, 200);
+    assert.strictEqual(selected.body.domain, 'legal', 'urlencoded domain must be echoed on the wire');
+    assert.ok(selected.body.answer.startsWith('根据律所知识库'), 'urlencoded domain must drive the answer phrasing');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('server-side: unknown domain falls back to general preset', async () => {
   const { kb, server, port } = await startServer();
   const unknown = await post(`http://localhost:${port}/api/chat`, { query: 'xyz', domain: 'slackbot' });
