@@ -2283,6 +2283,40 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('widget.js control bindings: the FAB click handler toggles the panel and seeds the greeting once, and the keydown binding wires Enter to submit', async () => {
+  const { kb, server, port } = await startServer();
+  // The embed test pins the FAB glyph, the close-button listener and the
+  // toggle/greeting lines as separate tokens, and the submit test pins the
+  // send-button click and the Enter branch. What is not locked is the wiring
+  // itself: the FAB must be bound to a click handler whose body toggles 'open'
+  // and seeds the greeting exactly once on the first open, and the input's
+  // keydown binding must wrap the Enter-branch. A rewire that dropped these
+  // bindings would leave the FAB dead and Enter unresponsive even though every
+  // inner line still exists.
+  try {
+    const res = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(res.status, 200);
+    // the FAB click binding: toggle 'open' then seed the greeting only on the
+    // first open — the whole trio must sit inside one click handler so the
+    // panel actually toggles when the FAB is pressed
+    assert.match(
+      res.body,
+      /fab\.addEventListener\('click', function \(\) \{\n\s*var open = panel\.classList\.toggle\('open'\);\n\s*if \(open && body\.children\.length === 0\) addMsg\('bot', esc\(GREETING\)\);\n\s*\}\);/,
+      'the FAB click handler must toggle the panel and seed the greeting once'
+    );
+    // the input keydown binding must wrap the Enter branch so pressing Enter
+    // inside the input submits through the same handler
+    assert.match(
+      res.body,
+      /input\.addEventListener\('keydown', function \(e\) \{\n\s*if \(e\.key === 'Enter'\) submit\(\);\n\s*\}\);/,
+      'the input keydown binding must wire Enter to submit'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js citation rendering: excerpt falls back to an empty string and is capped at 160 chars, and only cap-eligible citations compose the line', async () => {
   const { kb, server, port } = await startServer();
   // The wire tests lock /api/chat's excerpt field (a non-empty string) and the
