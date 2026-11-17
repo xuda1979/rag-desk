@@ -2504,6 +2504,34 @@ test('demo.js auto-sync chain: response parse, fillSelect apply, re-render tail 
   }
 });
 
+test('widget.js esc() mirrors the demo esc contract in ES5 form — null-coerced input, function-callback replace and the all-five-entity inline map', async () => {
+  const { kb, server, port } = await startServer();
+  // demo.js's esc() is locked in arrow form; the widget is ES5-era code and
+  // its esc() must carry the SAME XSS contract: null-coerce the input, replace
+  // every HTML metacharacter through a single lookup map, and index it with the
+  // matched character ([c]). Every widget interpolation — TITLE in the panel
+  // head, GREETING, the user question, the answer, citations and error reasons
+  // — funnels through this helper, so a broken/shadowed map would reopen the
+  // exact injection surface the demo contract already closed.
+  try {
+    const res = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(res.status, 200);
+    // the widget defines esc as a hoisted named function (ES5 style)
+    assert.ok(res.body.includes('function esc(s) {'), 'widget must define esc as a named function');
+    // null/undefined coerce to "" and the replace runs through a function
+    // callback (not the arrow form demo.js uses) — both forms must exist
+    assert.ok(res.body.includes("String(s == null ? '' : s).replace(/[&<>\"']/g, function (c) {"),
+      'widget esc must null-coerce input and use a function-callback replace');
+    // the full single-line map maps all five metacharacters and indexes the
+    // lookup by the matched character — a partial map would leak one entity
+    assert.ok(res.body.includes("return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c];"),
+      'widget esc must map all five HTML metacharacters inline and index by the matched char');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('widget.js resolves its own script tag via currentScript with a getElementsByTagName fallback, then reads data-* attrs from it', async () => {
   const { kb, server, port } = await startServer();
   // The data-attribute wiring test locks what the widget READS (data-api,
