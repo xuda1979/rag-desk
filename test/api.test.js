@@ -1854,6 +1854,48 @@ test('CORS wildcard allow-origin is returned on error responses too', async () =
   }
 });
 
+test('CORS pinned allow-origin is emitted verbatim on success, preflight and error responses', async () => {
+  const { kb, server, port } = await startServer({ allowOrigin: 'https://app.example' });
+  // RAGDESK_ALLOW_ORIGIN set to a concrete origin must be emitted as-is on
+  // every response — the list of allowed pages is a fixed production config,
+  // so a request from ANY other origin must still receive the pinned value,
+  // never a reflection of the requesting origin. This locks the middle branch
+  // of app.js CORS middleware (wildcard + default-reflection are covered
+  // elsewhere); a 404 here also proves the pinned value flows through the /api
+  // catch-all, not just happy paths.
+  const withOrigin = (method, reqPath, origin = 'https://attacker.example') =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        { host: 'localhost', port, method, path: reqPath, headers: { Origin: origin } },
+        (r) => {
+          r.resume();
+          r.on('end', () => resolve({ status: r.statusCode, allowOrigin: r.headers['access-control-allow-origin'] }));
+        }
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  try {
+    // preflight from a foreign origin gets the pinned origin, not a reflection
+    const preflight = await withOrigin('OPTIONS', '/api/chat');
+    assert.strictEqual(preflight.status, 204);
+    assert.strictEqual(preflight.allowOrigin, 'https://app.example', 'preflight must emit the pinned origin verbatim');
+
+    // happy path (public chat, no token) from a foreign origin
+    const chat = await withOrigin('GET', '/api/health');
+    assert.strictEqual(chat.status, 200);
+    assert.strictEqual(chat.allowOrigin, 'https://app.example', '200 responses must carry the pinned origin');
+
+    // error path (unknown /api route) from a foreign origin
+    const nope = await withOrigin('GET', '/api/nope');
+    assert.strictEqual(nope.status, 404);
+    assert.strictEqual(nope.allowOrigin, 'https://app.example', 'error responses must carry the pinned origin, not a reflection');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/admin/docs rows carry the size and created_at fields the admin table renders', async () => {
   const { kb, server, port } = await startServer();
   // admin.js renders d.size (KB), d.created_at, d.kind and d.chunk_count from
