@@ -2318,6 +2318,41 @@ test('demo.js submit flow: press send and the question is echoed escaped, the in
   }
 });
 
+test('admin-side class hooks: the .stats/.stat/.docs-table/.chunk/.danger/.ghost rules style.css ships stay paired with the classes admin.js and admin.html emit', async () => {
+  // The demo-side counterpart locks .bot-cite hooks; nothing pins the admin
+  // skin. A CSS rewire that restyles admin by id (or drops a rule) would
+  // silently orphan the class names the admin page markup and admin.js row
+  // renderers emit, so lock the class-name contract on both ends: the served
+  // stylesheet must keep every admin rule, admin.js must keep emitting the
+  // docs-count stats card and the per-row ghost/danger buttons, and the
+  // admin.html skeleton must keep the containers those rules style.
+  const { kb, server, port } = await startServer();
+  try {
+    const css = await get(`http://localhost:${port}/style.css`);
+    assert.strictEqual(css.status, 200);
+    for (const rule of ['.stats {', '.stat {', '.stat b {', '.stat span {', '.docs-table {', '.docs-table button.danger {', '.docs-table .ghost {', '.chunks {', '.chunk {', '.chunk .chunk-meta {']) {
+      assert.ok(css.body.includes(rule), `style.css must keep the admin rule "${rule}"`);
+    }
+
+    const admin = await get(`http://localhost:${port}/admin`);
+    assert.strictEqual(admin.status, 200);
+    assert.ok(admin.body.includes('<div id="stats" class="stats"></div>'), 'admin page must keep the #stats container with the .stats hook');
+    assert.ok(admin.body.includes('<table class="docs-table">'), 'admin page must keep the docs table with the .docs-table hook');
+    assert.ok(admin.body.includes('<table class="docs-table logs-table">'), 'admin page must keep the logs table with the .logs-table hook');
+    assert.ok(admin.body.includes('<div class="chunks" id="chunks-body"></div>'), 'admin page must keep the chunks container with the .chunks hook');
+
+    const js = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(js.status, 200);
+    assert.ok(js.body.includes('<div class="stat"><b>${docs.length}</b><span>文档</span></div>'), 'docs stats card must render the 文档 stat');
+    assert.ok(js.body.includes('<span>分块</span></div>`;'), 'docs stats card must render the 分块 stat');
+    assert.ok(js.body.includes('<td><button class="ghost" data-action="view" data-id="${d.id}">查看分块</button></td>'), 'docs rows must keep the .ghost 查看分块 button');
+    assert.ok(js.body.includes('<td><button class="danger" data-action="delete" data-id="${d.id}">删除</button></td>'), 'docs rows must keep the .danger 删除 button');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
   const { kb, server, port } = await startServer();
   // The demo page's domain <select> and example chips are driven by demo.js:
