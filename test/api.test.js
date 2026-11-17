@@ -1939,6 +1939,61 @@ test('chat-only token: /api/chat is gated while the admin area stays fully open'
   }
 });
 
+test('chatAuth matches the whole Authorization header: the bare token alone is not enough', async () => {
+  const { kb, server, port } = await startServer({ chatToken: 's3cret', adminToken: '' });
+  // chatAuth compares the ENTIRE Authorization header to exactly
+  // `Bearer ${chatToken}` (an exact string compare, not a token extract). So a
+  // client that sends the raw token with no "Bearer " scheme, the scheme with a
+  // stray space, or a differently-cased scheme — must ALL 401, even though each
+  // carries the right secret. Widget deployments hand the configured token to
+  // widget.js, which always prefixes "Bearer "; a secured chat must not accept
+  // an alternative spelling.
+  const chat = (authHeader) =>
+    new Promise((resolve, reject) => {
+      const data = JSON.stringify({ query: '几点开门' });
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/chat',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(data),
+            ...(authHeader ? { Authorization: authHeader } : {}),
+          },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out || '{}') }));
+        }
+      );
+      req.on('error', reject);
+      req.write(data);
+      req.end();
+    });
+  try {
+    const badVariants = [
+      's3cret', // bare token, no scheme
+      'Bearer  s3cret', // double space between scheme and token
+      'bearer s3cret', // lowercase scheme
+      'Bearer s3ret', // token itself differs
+    ];
+    for (const h of badVariants) {
+      const res = await chat(h);
+      assert.strictEqual(res.status, 401, `variant ${JSON.stringify(h)} must 401`);
+      assert.deepStrictEqual(res.body, { error: 'unauthorized' });
+    }
+
+    const ok = await chat('Bearer s3cret');
+    assert.strictEqual(ok.status, 200, 'the exact "Bearer <token>" spelling must still open chat');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin upload with no files returns a stable JSON 400', async () => {
   const { kb, server, port } = await startServer();
   // POST with no multipart body at all
