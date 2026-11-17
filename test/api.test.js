@@ -1937,6 +1937,34 @@ test('widget.js caps citations at two for the compact panel and surfaces network
   }
 });
 
+test('chat POST target wiring: widget.js fetches the data-api endpoint, demo.js fetches /api/chat literally, both escape the user question', async () => {
+  const { kb, server, port } = await startServer();
+  // The data-api/data-domain attributes only matter if the script actually
+  // issues fetch(API, ...) — a rewire to a hardcoded endpoint would break
+  // cross-origin embeds (widget) and the demo page would silently stop
+  // reaching /api/chat. Combined with the user-question XSS escape this
+  // locks the two chat submit paths end to end.
+  try {
+    const widget = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(widget.status, 200);
+    // the data-api fallback (locked separately) must feed the real POST target
+    assert.match(widget.body, /fetch\(API, \{/, 'widget must POST to the data-api value, not a hardcoded endpoint');
+    // the title fallback also labels the floating button's hover tooltip
+    assert.ok(widget.body.includes('fab.title = TITLE;'), 'title fallback must set the FAB tooltip');
+    // the user's question is escaped before innerHTML like every other interpolation
+    assert.ok(widget.body.includes("addMsg('user', esc(q));"), 'widget must escape the user question before rendering');
+
+    const demo = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(demo.status, 200);
+    // the demo posts straight to the same-origin /api/chat endpoint
+    assert.match(demo.body, /fetch\('\/api\/chat', \{/, 'demo must POST to /api/chat');
+    assert.ok(demo.body.includes("addMsg('user', esc(q));"), 'demo must escape the user question before rendering');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('static pages served', async () => {
   const { kb, server, port } = await startServer();
   const idx = await get(`http://localhost:${port}/`);
