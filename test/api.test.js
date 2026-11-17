@@ -2213,6 +2213,41 @@ test('static page skeletons carry the exact headings, form controls and table he
   }
 });
 
+test('widget.js panel chrome: the message area, input bar and send button are created and bound by id, and the input clears after every send', async () => {
+  const { kb, server, port } = await startServer();
+  // The pass-13 lock proves the panel's close button and input placeholder,
+  // but not that the chat area, the input bar and the send button exist or
+  // that submit() clears the box. A rewire that drops a chrome element (or
+  // renames its id, breaking host-page CSS/the querySelector bindings) would
+  // silently ship a dead input bar. Lock the four-line panel skeleton, the
+  // three getElementById-style bindings and the post-send clearing verbatim.
+  try {
+    const res = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(res.status, 200);
+    // the message scroll area must be a dedicated element (failure to create
+    // it leaves addMsg appending to a null node -> the whole widget dies)
+    assert.ok(res.body.includes('<div id="ragdesk-body"></div>'), 'widget panel must create the message area element');
+    // the bottom bar must wrap the text input (the input placeholder is
+    // already pinned; lock the bar container and the input's id together so a
+    // rewire cannot keep the placeholder copy while breaking the layout)
+    assert.ok(
+      res.body.includes('<div id="ragdesk-inputbar"><input id="ragdesk-input" placeholder="请输入问题…"/>'),
+      'widget panel must create the input bar wrapping the id-bound text input'
+    );
+    assert.ok(res.body.includes('<button id="ragdesk-send">发送</button>'), 'widget panel must create the send button');
+    // the three chrome elements must be bound to local vars by id (these are
+    // the only handles addMsg/submit/ask close over)
+    assert.ok(res.body.includes("var body = panel.querySelector('#ragdesk-body');"), 'widget must bind the message area handle');
+    assert.ok(res.body.includes("var input = panel.querySelector('#ragdesk-input');"), 'widget must bind the input handle');
+    assert.ok(res.body.includes("var sendBtn = panel.querySelector('#ragdesk-send');"), 'widget must bind the send button handle');
+    // after a successful send the box clears so the next question starts fresh
+    assert.ok(res.body.includes("input.value = '';"), 'widget must clear the input after handing off the question');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
   const { kb, server, port } = await startServer();
   // The demo page's domain <select> and example chips are driven by demo.js:
