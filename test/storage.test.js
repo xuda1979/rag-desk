@@ -89,6 +89,51 @@ test('storage: query log roundtrip, LEFT JOIN nulls and stats counts', () => {
   st.close();
 });
 
+test('storage: insertChunks rolls back every table when a mid-batch statement fails — no partial chunks, no fts rows', () => {
+  const { st } = tempStorage();
+  const docId = st.insertDoc({ filename: 'a.md', kind: 'markdown', mime: null, size: 6, sha256: 's1' });
+  // A duplicate (doc_id, chunk_idx) violates the unique constraint on the second
+  // statement, forcing the BEGIN IMMEDIATE ... ROLLBACK path in insertChunks.
+  st.stmt('CREATE UNIQUE INDEX uq_chunk ON chunks(doc_id, chunk_idx)').run();
+  assert.throws(
+    () => st.insertChunks(docId, [
+      { index: 1, text: '律师咨询费按每小时 300 元收取。' },
+      { index: 1, text: '同一索引，约束冲突。' },
+    ]),
+    /UNIQUE constraint failed/,
+    'the mid-batch failure must propagate'
+  );
+  assert.strictEqual(st.chunkCount(docId), 0, 'the committed first chunk is rolled back, not left behind');
+  assert.strictEqual(st.listChunks(docId).length, 0, 'chunks table holds nothing for the doc');
+  assert.strictEqual(st.search('咨询费').chunks.length, 0, 'fts holds no orphaned rows from the aborted batch');
+  assert.ok(st.getDoc(docId), 'the doc row itself survives the failed chunk write');
+  // the connection stays usable and a corrected batch commits normally
+  st.insertChunks(docId, [{ index: 2, text: '挂号请带身份证。' }]);
+  assert.strictEqual(st.chunkCount(docId), 1, 'a valid batch inserts after the rollback');
+  assert.strictEqual(st.search('挂号').chunks[0].chunkIndex, 2);
+  st.close();
+});
+
+test('storage: deleteDoc is atomic — a mid-transaction failure rolls back chunks and fts so nothing half-deletes', () => {
+  const { st } = tempStorage();
+  const docId = st.insertDoc({ filename: 'b.md', kind: 'markdown', mime: null, size: 6, sha256: 's2' });
+  st.insertChunks(docId, [{ index: 1, text: '咨询费按小时计费，合同纠纷在被告住所地起诉。' }]);
+  // A BEFORE DELETE trigger raising ABORT makes the docs delete statement fail
+  // after the fts/chunks deletes already ran, exercising the ROLLBACK path.
+  st.db.exec("CREATE TRIGGER trg_block_del BEFORE DELETE ON docs BEGIN SELECT RAISE(ABORT, 'delete blocked'); END");
+  assert.throws(() => st.deleteDoc(docId), /delete blocked/);
+  assert.strictEqual(st.chunkCount(docId), 1, 'chunks delete is rolled back');
+  assert.ok(st.getDoc(docId), 'doc row delete is rolled back');
+  assert.strictEqual(st.search('咨询费').chunks.length, 1, 'fts delete is rolled back');
+  // without the abort, the same delete cleans all three consistently
+  st.db.exec('DROP TRIGGER trg_block_del');
+  st.deleteDoc(docId);
+  assert.strictEqual(st.listDocs().length, 0);
+  assert.strictEqual(st.chunkCount(docId), 0);
+  assert.strictEqual(st.search('咨询费').chunks.length, 0);
+  st.close();
+});
+
 test('storage: settings upsert is idempotent per key', () => {
   const { st } = tempStorage();
   st.setSetting('theme', 'dark');
