@@ -925,3 +925,79 @@ test('prod: examples/embeddable.html embed contract matches widget.js and a real
     assert.ok(DOMAINS[attr[1]], `example references domain "${attr[1]}" but no such preset is served`);
   }
 });
+
+test('prod: README.md documents the exact API, env, limits, response shape and embed surface the code serves', () => {
+  // README.md is the operational contract fed into the software-copyright
+  // submission: its route table, env table, upload limits and chat response
+  // shape must stay true to what src/app.js / src/server.js / src/lib/knowledge.js
+  // actually implement. A doc drift here ships a spec that the binary denies.
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+
+  // ---- route table (README table rows) must match app.js route registrations
+  const appRoutes = {
+    'GET /api/health': /app\.get\('\/api\/health',/,
+    'GET /api/domains': /app\.get\('\/api\/domains',/,
+    'GET /api/admin/docs ': /app\.get\('\/api\/admin\/docs',/,
+    'GET /api/admin/docs/:id': /app\.get\('\/api\/admin\/docs\/:id',/,
+    'DELETE /api/admin/docs/:id': /app\.delete\('\/api\/admin\/docs\/:id',/,
+    'POST /api/admin/upload': /app\.post\('\/api\/admin\/upload',/,
+    'GET /api/admin/logs': /app\.get\('\/api\/admin\/logs',/,
+    'GET /api/admin/stats': /app\.get\('\/api\/admin\/stats',/,
+    'GET /widget.js': /app\.get\('\/widget\.js',/,
+  };
+  for (const methodPath of Object.keys(appRoutes)) {
+    const [verb, p] = methodPath.split(' ');
+    assert.match(appSrc, appRoutes[methodPath], `src/app.js must register ${verb} ${p} as README documents`);
+    assert.ok(
+      readme.includes(p),
+      `README.md must document the ${p} route`
+    );
+  }
+  assert.ok(readme.includes('/api/chat'), 'README.md must document POST /api/chat');
+
+  // ---- upload limits: field name `files`, max 20 files, max 50MB each
+  assert.match(appSrc, /upload\.array\('files', 20\)/, 'app.js must accept field "files", max 20');
+  assert.match(appSrc, /fileSize: 50 \* 1024 \* 1024/, 'app.js must cap each file at 50MB');
+  assert.match(readme, /字段名 `files`/, 'README must document the multipart field name');
+  assert.match(readme, /50MB/, 'README must document the 50MB per-file limit');
+  assert.match(readme, /20 个/, 'README must document the 20-file per-upload limit');
+
+  // ---- chat response shape: the README sample must match knowledge.js answer()
+  const responseKeys = ['answer', 'mode', 'llm', 'confidence', 'citations', 'top', 'query'];
+  for (const key of responseKeys) {
+    assert.match(kbSrc, new RegExp(`${key}:`), `knowledge.js answer() must return ${key} as README documents`);
+  }
+  // citations entries carry docId/document/paragraph/excerpt; top carries the same
+  assert.match(kbSrc, /docId: c\.docId/, 'citations entries must carry docId');
+  assert.match(kbSrc, /document: c\.filename/, 'citations entries must carry document');
+  assert.match(kbSrc, /paragraph: c\.chunkIndex/, 'citations entries must carry paragraph');
+  assert.match(kbSrc, /excerpt: this\.excerptFrom/, 'citations entries must carry excerpt');
+  assert.match(kbSrc, /mode: 'offline-retrieval'/, 'offline mode tag must be exactly what README shows');
+  assert.match(kbSrc, /llm: false/, 'llm must default false as README states');
+  assert.match(readme, /"mode": "offline-retrieval"/, 'README sample must show mode offline-retrieval');
+  assert.match(readme, /"llm": false/, 'README sample must show llm false');
+
+  // ---- env table: every documented variable is read, defaults match server.js
+  const envReads = [
+    ['PORT', serverSrc, 'process.env.PORT'],
+    ['RAGDESK_DB', serverSrc, 'process.env.RAGDESK_DB'],
+    ['RAGDESK_ADMIN_TOKEN', appSrc, 'RAGDESK_ADMIN_TOKEN'],
+    ['RAGDESK_CHAT_TOKEN', appSrc, 'RAGDESK_CHAT_TOKEN'],
+    ['RAGDESK_ALLOW_ORIGIN', appSrc, 'RAGDESK_ALLOW_ORIGIN'],
+  ];
+  for (const [varName, src, needle] of envReads) {
+    assert.ok(readme.includes(varName), `README.md must document ${varName}`);
+    assert.ok(src.includes(needle), `${varName} documented in README must actually be read (${needle})`);
+  }
+  assert.match(serverSrc, /PORT \|\| 3000/, 'README default PORT=3000 must match server.js');
+  assert.match(serverSrc, /RAGDESK_DB \|\| path\.join\(ROOT, 'data', 'ragdesk\.db'\)/, 'README default DB path must match server.js');
+
+  // ---- health / admin page / embed surface
+  assert.ok(readme.includes('/api/health'), 'README must document the health endpoint');
+  assert.ok(readme.includes('/admin'), 'README must document the admin page');
+  assert.ok(readme.includes('widget.js'), 'README must document widget.js');
+  assert.ok(readme.includes('ragdesk-data'), 'README must document the persistent named volume');
+});
