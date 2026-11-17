@@ -1160,6 +1160,105 @@ test('wrong method on a known API path returns the stable JSON 404, not HTML', a
   }
 });
 
+test('HEAD on JSON API routes mirrors GET headers with zero body — 200s, JSON content-type, exact byte lengths; POST-only/unknown paths still 404 and gated routes still 401', async () => {
+  const { kb, server, port } = await startServer({ adminToken: 'adm0' });
+  // express answers HEAD by invoking the GET route then stripping the body, so
+  // a HEAD probe is the cheapest liveness check a monitoring/health scraper can
+  // make. Node http NEVER sends a body for HEAD, so express promises the same
+  // Content-Length as the GET would carry — do not let a route-level sendFile
+  // or a naive 404 doc change that contract. The wrong-method test above covers
+  // other non-existent verbs; HEAD is special because express auto-routes it to
+  // GET registrations, so it gets real 200s here where PUT/PATCH would 404.
+  const headReq = (reqPath, headers = {}) =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        { host: 'localhost', port, path: reqPath, method: 'HEAD', headers },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () =>
+            resolve({
+              status: r.statusCode,
+              contentType: r.headers['content-type'],
+              contentLength: r.headers['content-length'],
+              allowOrigin: r.headers['access-control-allow-origin'],
+              body: out,
+            })
+          );
+        }
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  // GET is the reference for the byte-exact length HEAD promises
+  const getBodyLen = (reqPath) =>
+    new Promise((resolve, reject) => {
+      let out = '';
+      http
+        .get({ host: 'localhost', port, path: reqPath }, (r) => {
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve(Buffer.byteLength(out)));
+        })
+        .on('error', reject);
+    });
+  try {
+    // 1. GET routes: HEAD 200 with the JSON content type and the EXACT byte
+    // length the real GET would send, but with zero body bytes on the wire.
+    for (const reqPath of ['/api/health', '/api/domains']) {
+      const route = reqPath === '/api/health' ? 'health' : 'domains';
+      const headRes = await headReq(reqPath);
+      assert.strictEqual(headRes.status, 200, `HEAD ${reqPath} must 200`);
+      assert.strictEqual(headRes.contentType, 'application/json; charset=utf-8', `${route} HEAD keeps the JSON content type`);
+      assert.strictEqual(Buffer.byteLength(headRes.body), 0, `${route} HEAD must not leak a body`);
+      assert.strictEqual(headRes.contentLength, String(await getBodyLen(reqPath)), `${route} HEAD promises exactly the GET byte length`);
+    }
+    // 2. HEAD preserves CORS like GET — a widget check that keeps the embeddable
+    // page from seeing a false CORS failure on a header-only probe.
+    const corsHead = await headReq('/api/health', { Origin: 'https://widget.example' });
+    assert.strictEqual(corsHead.status, 200);
+    assert.strictEqual(corsHead.allowOrigin, 'https://widget.example', 'HEAD carries the CORS header for cross-origin probes');
+
+    // 3. POST-only route: HEAD falls through to the same JSON 404 as the wrong
+    // method case (no body bytes, content-type JSON).
+    const chatHead = await headReq('/api/chat');
+    assert.strictEqual(chatHead.status, 404, 'HEAD /api/chat (POST-only route) must 404');
+    assert.strictEqual(chatHead.contentType, 'application/json; charset=utf-8');
+    assert.strictEqual(Buffer.byteLength(chatHead.body), 0);
+
+    // 4. gated routes: HEAD is authorizing before serving — the token gate is
+    // still enforced, not bypassed, on header-only probes.
+    const adminHead = await headReq('/api/admin/docs');
+    assert.strictEqual(adminHead.status, 401, 'HEAD on a token-gated admin route must still 401 without the token');
+    assert.strictEqual(Buffer.byteLength(adminHead.body), 0);
+
+    // 5. unknown API path: same JSON 404 as a GET to it.
+    const unknownHead = await headReq('/api/nope');
+    assert.strictEqual(unknownHead.status, 404, 'HEAD on an unknown API path must 404');
+    assert.strictEqual(unknownHead.contentType, 'application/json; charset=utf-8');
+    assert.strictEqual(Buffer.byteLength(unknownHead.body), 0);
+
+    // 6. no query logging on a HEAD probe of the chat route (it never reaches
+    // the POST handler). This server is token-gated (adm0), so the stats fetch
+    // must carry the header like the admin UI would.
+    const stats = await new Promise((resolve, reject) => {
+      let out = '';
+      http
+        .get(
+          { host: 'localhost', port, path: '/api/admin/stats', headers: { 'x-admin-token': 'adm0' } },
+          (r) => {
+            r.on('data', (c) => (out += c));
+            r.on('end', () => resolve(JSON.parse(out || '{}')));
+          }
+        )
+        .on('error', reject);
+    });
+    assert.deepStrictEqual(stats.stats, { total: 0, with_answer: 0 }, 'HEAD probes are not logged as queries');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('DELETE of an existing document removes it from list and search', async () => {
   const { kb, server, port } = await startServer();
   await kb.ingestBuffer('del.md', Buffer.from('疫苗接种时间每周二、周四、周六上午。'));
