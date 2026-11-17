@@ -2461,6 +2461,69 @@ test('chatAuth matches the whole Authorization header: the bare token alone is n
   }
 });
 
+test('admin gate reads only the exact x-admin-token header, not Authorization — the two gates live on separate keys', async () => {
+  const { kb, server, port } = await startServer({ adminToken: 'adm0', chatToken: 'ch0' });
+  // The preflight advertises "Content-Type, x-admin-token, Authorization" and
+  // chatAuth reads Authorization, but nothing pins WHERE the admin gate reads
+  // FROM: every existing token test sends the token in a header literally
+  // spelled x-admin-token (the same constant assertAdmin compares), so a
+  // refactor that moved admin auth onto Authorization — or an accidental swap
+  // of the two secrets — would keep every test green while silently letting
+  // one deployment's token open the wrong surface.
+  const adminReq = (headers) =>
+    new Promise((resolve, reject) => {
+      const r = http.request({ host: 'localhost', port, path: '/api/admin/docs', method: 'GET', headers }, (res) => {
+        let out = '';
+        res.on('data', (c) => (out += c));
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(out || '{}') }));
+      });
+      r.on('error', reject);
+      r.end();
+    });
+  try {
+    // The admin token must NOT be importable via the chat gate's key.
+    const adminTokAsBearer = await adminReq({ Authorization: 'Bearer adm0' });
+    assert.strictEqual(adminTokAsBearer.status, 401, 'admin token inside Authorization must not open admin');
+    assert.strictEqual(adminTokAsBearer.body.error, 'unauthorized: missing or invalid x-admin-token');
+
+    // A chat token in Authorization must not satisfy the admin gate either.
+    const chatTokAsBearer = await adminReq({ Authorization: 'Bearer ch0' });
+    assert.strictEqual(chatTokAsBearer.status, 401, 'the chat token must not open admin via Authorization');
+
+    // The exact key still opens it, proving the 401s are about the header key,
+    // not about auth being broken.
+    const good = await adminReq({ 'x-admin-token': 'adm0' });
+    assert.strictEqual(good.status, 200, 'the exact x-admin-token header still opens admin');
+
+    // Symmetrically, the chat gate must reject the admin key: chat auth is
+    // Authorization-only, so a client crossing the keys is locked out.
+    const chatRes = await new Promise((resolve, reject) => {
+      const data = JSON.stringify({ query: '几点开门' });
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/chat',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), 'x-admin-token': 'ch0' },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out || '{}') }));
+        }
+      );
+      req.on('error', reject);
+      req.write(data);
+      req.end();
+    });
+    assert.strictEqual(chatRes.status, 401, 'chat must not accept the correct chat token in the x-admin-token header');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin upload with no files returns a stable JSON 400', async () => {
   const { kb, server, port } = await startServer();
   // POST with no multipart body at all
