@@ -1706,6 +1706,51 @@ test('/style.css serves as CSS and both statically served pages link it', async 
   }
 });
 
+test('static pages carry the in-page fallback presets, upload accept-list and nav links the JS renders', async () => {
+  const { kb, server, port } = await startServer();
+  // The element-id/script tests only prove demo.js CAN find its hooks; the
+  // demo page's offline fallback (used when /api/domains sync bails) is that
+  // <select> already contains one <option> per domain id, the admin upload
+  // form's accept list advertises exactly the extensions isSupportedFile()
+  // accepts, and the footer links reach the admin panel and health check.
+  try {
+    const idx = await get(`http://localhost:${port}/`);
+    assert.strictEqual(idx.status, 200);
+    // the four fallback options must exist verbatim — a rewire that drops one
+    // leaves the demo unable to switch domains when /api/domains is unreachable
+    for (const [id, label] of [
+      ['legal', '法律 · 律师事务所'],
+      ['medical', '医疗 · 诊所'],
+      ['procurement', '招采 · 中标公告'],
+      ['general', '通用'],
+    ]) {
+      assert.ok(
+        idx.body.includes(`<option value="${id}">${label}</option>`),
+        `demo page must keep the ${id} fallback <option> with its exact label`
+      );
+    }
+    assert.strictEqual((idx.body.match(/<option/g) || []).length, 4, 'demo page must not drift from the four preset domains');
+    // footer nav: the demo links to the admin panel and the health check
+    assert.ok(idx.body.includes('<a href="/admin">管理后台</a>'), 'demo footer must link the admin panel');
+    assert.ok(idx.body.includes('<a href="/api/health">健康检查</a>'), 'demo footer must link the health check');
+    assert.ok(idx.body.includes('<code>RAG-DESK 数据完全本地存储</code>'), 'demo footer must keep the local-storage slogan');
+
+    const admin = await get(`http://localhost:${port}/admin`);
+    assert.strictEqual(admin.status, 200);
+    // the accept list must keep matching the server-side whitelist (md, markdown,
+    // pdf, docx, txt, csv); a narrower list would silently hide formats the
+    // server indexes, a wider one would invite unsupported-kind upload errors
+    assert.ok(
+      admin.body.includes('accept=".md,.markdown,.pdf,.docx,.txt,.csv"'),
+      'admin upload input must advertise exactly the six supported extensions'
+    );
+    assert.ok(admin.body.includes('<a href="/">返回演示页</a>'), 'admin page must link back to the demo');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo page wiring: chat body shape, error surfacing, domains auto-sync and XSS escape', async () => {
   const { kb, server, port } = await startServer();
   // demo.js is the demo page's only client logic (widget.js has three source
