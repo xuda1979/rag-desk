@@ -2283,6 +2283,29 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('widget.js addMsg: every bubble is a fresh div carrying the rd-msg+role class, fed escaped html via innerHTML, appended to the panel body and scrolled into view', async () => {
+  const { kb, server, port } = await startServer();
+  // The class-hook test pins the rd-msg hook and the embed test pins the
+  // scroll line, but the element mechanics between them are unpinned: addMsg
+  // must build a brand-new div per message, inject the pre-escaped html via
+  // innerHTML (so the <br>/span/cite markup survives — a textContent leak
+  // would print raw tags), and append it to the panel body before scrolling.
+  // Every widget bubble (greeting, answers, errors, citations) goes through
+  // this one function, so the whole block must stay contiguous.
+  try {
+    const res = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(res.status, 200);
+    assert.match(
+      res.body,
+      /function addMsg\(who, html\) \{\n\s*var m = document\.createElement\('div'\);\n\s*m\.className = 'rd-msg ' \+ who;\n\s*m\.innerHTML = html;\n\s*body\.appendChild\(m\);\n\s*body\.scrollTop = body\.scrollHeight;\n\s*\}/,
+      'widget addMsg must create, tag, inject and append each bubble then scroll'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js renderBotMessage: the answer is escaped first, then newlines render as <br>, and that exact string heads the return before the bot-meta block', async () => {
   const { kb, server, port } = await startServer();
   // The widget twin's answer line is pinned (var ans = esc(...).replace...)
