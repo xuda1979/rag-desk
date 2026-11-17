@@ -2283,6 +2283,43 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('widget.js request construction: JSON content-type base headers, Authorization only behind the token guard, and the POST call shape', async () => {
+  const { kb, server, port } = await startServer();
+  // The chat-token test locks that the data-token attribute is read and that
+  // the Authorization header carries the 'Bearer ' + TOKEN value. What is not
+  // locked is the shape around it: the base headers object must declare JSON
+  // so /api/chat's content-type check accepts the body, the bearer may only be
+  // attached behind the if (TOKEN) guard (never an empty Authorization
+  // header), and the fetch must POST with those headers and the { query,
+  // domain } body (the exact request /api/chat validates). A rewire that
+  // dropped the content-type or sent GET would silently break the token-gated
+  // and JSON routes simultaneously.
+  try {
+    const res = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(res.status, 200);
+    // the base headers object always declares the JSON content type
+    assert.ok(
+      res.body.includes("var headers = { 'Content-Type': 'application/json' };"),
+      'widget must build a JSON content-type base headers object'
+    );
+    // the bearer token is only attached when a token is configured — a bare
+    // or empty Authorization header must never be sent
+    assert.ok(
+      res.body.includes("if (TOKEN) headers.Authorization = 'Bearer ' + TOKEN;"),
+      'widget must attach the bearer token only behind the token guard'
+    );
+    // ask() POSTs its headers (not a hardcoded object) so the guard above and
+    // the content-type base actually ride the request /api/chat sees
+    assert.ok(
+      res.body.includes("method: 'POST',\n      headers: headers,"),
+      'widget must POST with the constructed headers object'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin.js upload guard-and-error chain: empty selection no-ops, non-ok surfaces HTTP status with fallback text, unknown actions render verbatim and the table refreshes', async () => {
   const { kb, server, port } = await startServer();
   // The wire tests lock /api/admin/upload's statuses (indexed/duplicate/error)
