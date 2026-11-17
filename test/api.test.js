@@ -2089,6 +2089,52 @@ test('demo example chips fill the input and submit via requestSubmit; widget FAB
   }
 });
 
+test('admin.js routes each data function to its wire-locked endpoint; widget close hides the panel; demo input carries the placeholder', async () => {
+  const { kb, server, port } = await startServer();
+  // The /api/admin/* wire tests and the admin.html form alone do not prove the
+  // page's JS actually calls those endpoints from the functions that render
+  // them. Lock the data-function -> endpoint pairing so a rewire that points a
+  // button at the wrong route (or drops a call) stays visible, plus the widget
+  // close button that makes the FAB toggle symmetric, and the demo input
+  // placeholder that tells users what to ask.
+  try {
+    const admin = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(admin.status, 200);
+    for (const [fn, call] of [
+      ['loadStats', "adminFetch('/api/admin/stats')"],
+      ['loadDocs (boot + refresh)', "adminFetch('/api/admin/docs')"],
+      ['delete', "adminFetch('/api/admin/docs/' + d.id, { method: 'DELETE' })"],
+      ['viewChunks', "adminFetch('/api/admin/docs/' + id)"],
+      ['loadLogs', "adminFetch('/api/admin/logs?limit=50')"],
+      ['upload', "adminFetch('/api/admin/upload', { method: 'POST', body: fd })"],
+    ]) {
+      assert.ok(admin.body.includes(call), `admin.js ${fn} must call ${call}`);
+    }
+    // the per-action upload results only exist because the caught response is
+    // parsed and mapped; lock the action-key branches the admin panel renders
+    assert.ok(admin.body.includes("r.action === 'indexed'"), 'upload results must render the indexed action');
+    assert.ok(admin.body.includes("r.action === 'duplicate'"), 'upload results must render the duplicate action');
+    assert.ok(admin.body.includes("r.action === 'error'"), 'upload results must render the error action');
+
+    const widget = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(widget.status, 200);
+    // the close button is the inverse of the FAB toggle — a rewire that breaks
+    // close leaves the panel stuck open after dismissal
+    assert.match(widget.body, /panel\.querySelector\('#ragdesk-close'\)\.addEventListener\('click', function \(\) \{\n\s*panel\.classList\.remove\('open'\);/);
+
+    const idx = await get(`http://localhost:${port}/`);
+    assert.strictEqual(idx.status, 200);
+    // the ask input advertises a concrete example so users know what to type
+    assert.ok(
+      idx.body.includes('placeholder="请输入您的问题，例如：律师咨询费怎么收取？"'),
+      'demo ask input must keep the example placeholder'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('static pages served', async () => {
   const { kb, server, port } = await startServer();
   const idx = await get(`http://localhost:${port}/`);
