@@ -1995,6 +1995,41 @@ test('client submit guards: blank/whitespace questions never fire a request, dem
   }
 });
 
+test('admin.js upload wiring: click-to-upload binding, disabled in-flight guard, error surfaces and data-action row buttons', async () => {
+  const { kb, server, port } = await startServer();
+  // The upload/render contracts are locked (FormData append, action notches,
+  // pending label), but the *wiring* that makes them fire is not: the click
+  // binding on the upload button, the re-entry guard that disables it while a
+  // batch upload is in flight, the network-failure path and the per-row
+  // view/delete buttons that adminFetch against /api/admin/docs — a rewire
+  // that drops any of these silently breaks the panel without touching the
+  // already-pinned render strings.
+  try {
+    const res = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(res.status, 200);
+    // the upload button is the single trigger for the whole upload flow
+    assert.ok(res.body.includes("uploadBtn.addEventListener('click', upload);"), 'the upload button must be click-bound to upload');
+    // in-flight guard: once a batch upload starts the button is disabled (so a
+    // second click cannot interleave) and re-enabled after try/finally semantics
+    assert.ok(res.body.includes('uploadBtn.disabled = true;'), 'upload must disable the button while in flight');
+    assert.ok(res.body.includes('uploadBtn.disabled = false;'), 'upload must re-enable the button after the batch');
+    // no selected files: the upload short-circuits before any request
+    assert.ok(res.body.includes('if (!files.length) return;'), 'upload must short-circuit with no selected files');
+    // network failure surfaces the reason instead of blanking the result area
+    assert.ok(res.body.includes("uploadResult.textContent = '上传失败：' + e.message;"), 'upload must surface network failures with the reason');
+    // per-row buttons carry data-actions and round-trip through adminFetch so a
+    // deleted doc refreshes the table; the "leave unless confirmed" gate pins
+    // the confirm prompt that guards every delete
+    assert.ok(res.body.includes('tr.querySelector(\'[data-action="view"]\').addEventListener(\'click\', () => viewChunks(d.id, d.filename));'), 'view buttons must open the chunk preview for that doc');
+    assert.ok(res.body.includes("tr.querySelector('[data-action=\"delete\"]').addEventListener('click', async () => {"), 'delete buttons must bind a click handler');
+    assert.ok(res.body.includes('if (!confirm(`删除文档「${d.filename}」及其分块？`)) return;'), 'delete must be confirm-gated');
+    assert.ok(res.body.includes("await adminFetch('/api/admin/docs/' + d.id, { method: 'DELETE' });"), 'delete must call adminFetch DELETE on the doc endpoint');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin.js renders the wire-locked admin fields: stats arithmetic, logs "-" fallbacks, chunk detail meta, empty/error states', async () => {
   const { kb, server, port } = await startServer();
   // The wire payload shapes are locked (/api/admin/stats, /api/admin/logs,
