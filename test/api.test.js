@@ -2353,6 +2353,38 @@ test('admin-side class hooks: the .stats/.stat/.docs-table/.chunk/.danger/.ghost
   }
 });
 
+test('demo.js offline FALLBACK presets: the in-page legal/medical/procurement/general presets and the FALLBACK default state survive so the demo boots when /api/domains is unreachable', async () => {
+  // The /api/domains wire test locks the server-side presets; demo.js also
+  // ships its own copy of the four presets used only while the sync fetch has
+  // not resolved. Those FALLBACK strings deliberately differ from the server
+  // presets (e.g. the demo legal greeting omits 法律法规, general is 通用 not
+  // 通用 · General), so a stale/refused /api/domains still leaves the select,
+  // greeting and chips populated. Nothing pins them; a rewire that guts
+  // FALLBACK (or inits domains to empty) would render a blank domain toolbar
+  // offline while every wire test passes.
+  const { kb, server, port } = await startServer();
+  try {
+    const res = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(res.status, 200);
+    assert.ok(res.body.includes('const FALLBACK = {'), 'demo.js must still ship the in-page FALLBACK presets');
+    assert.ok(res.body.includes('let domains = FALLBACK;'), 'domains must default to FALLBACK before the sync resolves');
+    assert.ok(res.body.includes('// In-page fallback so the demo still works if /api/domains is unreachable.'), 'demo.js must keep the offline-resilience comment');
+    assert.ok(res.body.includes("label: '法律 · 律师事务所',"), 'FALLBACK legal label must stay');
+    assert.ok(res.body.includes("greeting: '您好，我是律所智能问答助手。您可以询问合同、诉讼流程、收费标准等问题。',"), 'FALLBACK legal greeting must stay');
+    assert.ok(res.body.includes("label: '医疗 · 诊所',"), 'FALLBACK medical label must stay');
+    assert.ok(res.body.includes("greeting: '您好，我是诊所在线导诊助手。可以询问挂号、科室、体检等问题。',"), 'FALLBACK medical greeting must stay');
+    assert.ok(res.body.includes("label: '招采 · 中标公告',"), 'FALLBACK procurement label must stay');
+    assert.ok(res.body.includes("greeting: '您好，这里是招投标信息助手。可以查询公告要点、投标要求、截止时间。',"), 'FALLBACK procurement greeting must stay');
+    assert.ok(res.body.includes("label: '通用',"), 'FALLBACK general preset must stay with its distinct 通用 label');
+    assert.ok(res.body.includes("greeting: '您好，这是您专属的知识库问答助手。',"), 'FALLBACK general greeting must stay');
+    assert.ok(res.body.includes("examples: ['律师咨询费怎么收取？', '劳动仲裁的流程是什么？', '合同纠纷可以起诉吗？'],"), 'FALLBACK legal chips must stay');
+    assert.ok(res.body.includes("examples: [],"), 'FALLBACK general must expose no chips');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
   const { kb, server, port } = await startServer();
   // The demo page's domain <select> and example chips are driven by demo.js:
