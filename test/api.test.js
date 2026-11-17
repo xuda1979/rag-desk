@@ -298,6 +298,41 @@ test('server-side: a valid domain selection is honored in the answer phrasing on
   }
 });
 
+test('server-side: a chat miss returns the selected domain\'s own fallback phrase on the wire', async () => {
+  const { kb, server, port } = await startServer();
+  // Each domain preset ships a distinct no-result phrase (src/lib/domains.js).
+  // The retrieval-miss path must surface the SELECTED preset's fallback, not
+  // always the general one — demo.js sends domainSelect.value on every chat
+  // request, so a missed query under a domain page would otherwise leak the
+  // generic phrasing. ASCII-only queries tokenize to a Latin run that cannot
+  // match the ingested Chinese doc, guaranteeing a miss.
+  try {
+    await kb.ingestBuffer('legal.md', Buffer.from('律师咨询费按每小时 300 元收取，首次咨询免费。'));
+    const cases = [
+      ['legal', '抱歉，我在知识库中暂未找到与您问题直接相关的内容。您可以换个问法，或咨询前台获取人工帮助。'],
+      ['medical', '很抱歉，目前的知识库中还没有相关内容。您可以致电诊所前台，或描述得更具体一些。'],
+      ['procurement', '抱歉，我还没有检索到相关的公告内容。您可以提供项目名称关键词，我再帮您查找。'],
+    ];
+    for (const [domain, fallback] of cases) {
+      const res = await post(`http://localhost:${port}/api/chat`, { query: 'abxqzz', domain });
+      assert.strictEqual(res.status, 200);
+      assert.deepStrictEqual(res.body, {
+        answer: fallback,
+        mode: 'offline-retrieval',
+        llm: false,
+        domain,
+        confidence: 0,
+        citations: [],
+        top: null,
+        query: 'abxqzz',
+      }, `${domain} miss must return its own fallback phrase, not the general one`);
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('server-side: /api/health reports the full offline engine payload', async () => {
   const { kb, server, port } = await startServer();
   try {
