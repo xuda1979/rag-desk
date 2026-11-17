@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 const fs = require('node:fs');
+const { spawn } = require('node:child_process');
 
 const { KnowledgeBase } = require('../src/lib/knowledge');
 const { ensureCorpusFiles, seedIfNeeded } = require('../scripts/seed-fixtures');
@@ -11,6 +12,21 @@ const { buildPdfFixture } = require('../scripts/make-pdf-fixture');
 const { extractDocx, parseCsv } = require('../src/lib/extractors');
 
 const CORPUS = path.join(__dirname, '..', 'fixtures', 'corpus');
+const ROOT = path.join(__dirname, '..');
+
+function runCli(args) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', ...args], {
+      cwd: ROOT,
+      env: process.env,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => (stdout += d));
+    child.stderr.on('data', (d) => (stderr += d));
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
 
 test('fixture corpus contains all required formats', async () => {
   await ensureCorpusFiles();
@@ -113,4 +129,40 @@ test('seedIfNeeded returns added/skipped and is idempotent by sha256', async () 
   assert.strictEqual(forced.skipped, first.added);
   assert.strictEqual(kb.getAllDocs().length, docCount);
   kb.close();
+});
+
+test('seed-fixtures CLI entrypoint runs the seed to completion (exit 0 with added/skipped counts)', async () => {
+  // Covers the `require.main === module` arm (scripts/seed-fixtures.js:64):
+  // main() writes only the gitignored data/ragdesk.db dev database, and the
+  // sha256 pre-check makes a re-seed against unchanged files report added=0,
+  // so running the real script never mutates git-tracked files.
+  const { code, stdout, stderr } = await runCli(['scripts/seed-fixtures.js']);
+  assert.strictEqual(code, 0, `seed CLI should exit cleanly, stderr: ${stderr}`);
+  assert.match(stdout, /\[seed\] added=\d+ skipped=\d+/, 'main() must print the seeding tally');
+});
+
+test('make-pdf-fixture CLI entrypoint prints a skip decision and exits 0', async () => {
+  // Covers the pdfkit-absent CLI arm (scripts/make-pdf-fixture.js:124): with
+  // the dev-only generator missing (this environment), buildPdfFixture returns
+  // false and main prints "PDF fixture skipped" without rewriting the file.
+  const { code, stdout, stderr } = await runCli(['scripts/make-pdf-fixture.js']);
+  assert.strictEqual(code, 0, `pdf CLI should exit cleanly, stderr: ${stderr}`);
+  assert.match(stdout, /PDF fixture (skipped|written)/, 'CLI must report its decision');
+  assert.ok(fs.existsSync(path.join(CORPUS, 'clinic-guide.pdf')), 'committed PDF must survive');
+});
+
+test('make-pdf-fixture throws when pdfkit is absent and no committed PDF exists', async () => {
+  // Covers the throw arm scripts/make-pdf-fixture.js:78: buildPdfFixture looks
+  // up fs.existsSync on the shared 'node:fs' object at call time, so aliasing
+  // it to hide only clinic-guide.pdf drives the `!fs.existsSync(outPath)`
+  // branch without touching the real file (safe under parallel test files).
+  const real = fs.existsSync;
+  const outPath = path.join(CORPUS, 'clinic-guide.pdf');
+  try {
+    fs.existsSync = (p) => (p === outPath ? false : real(p));
+    await assert.rejects(() => buildPdfFixture(), /pdfkit unavailable/);
+  } finally {
+    fs.existsSync = real;
+    assert.ok(real(outPath), 'the committed PDF is still intact after the probe');
+  }
 });
