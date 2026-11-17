@@ -1996,6 +1996,47 @@ test('/api/chat body is exactly the engine answer contract: full-payload lock', 
   }
 });
 
+test('/api/chat citation excerpt is anchor-windowed on the wire, not head-cut', async () => {
+  const { kb, server, port } = await startServer();
+  // excerptFrom() windows the citation excerpt around the first query-hit so
+  // UIs render the ANSWER slice instead of the chunk head. Unit tests lock the
+  // helper, but /api/chat only asserted excerpt.length > 0 — a head-cutting
+  // regression would either truncate away the anchor or grow past 160 chars,
+  // and both are caught here. The doc is one 223-char no-break paragraph, so
+  // chunkText emits it as a single chunk unchanged; the first 采购流程 sits at
+  // index 173 (>160), deep enough that only windowing (not head-cutting) can
+  // produce the expected 160-char excerpt that still contains the anchor.
+  const lead =
+    '本通知适用于所有拟参与本招标项目的潜在供应商，请务必在正式投标之前阅读以下全部条款，' +
+    '各项要求适用于供应商准入、资格预审以及后续全部招标环节，' +
+    '第三条特别强调潜在投标人应当具备合法经营资格，且近三年内未发生重大违法违规记录，' +
+    '第四条要求提交最近一年经审计的财务报表以证明财务状况良好，' +
+    '第五条要求投标文件在投标截止时间前递交至指定地点并附完整原件，';
+  const tail =
+    '其中与采购流程直接相关的补充材料应当单独装订成册随附递交，评审委员会将依据公开公平公正的原则进行综合评审。';
+  const body = lead + tail;
+  assert.ok(body.indexOf('采购流程') > 160, 'premise: the anchor term sits deeper than the 160-char window');
+  await kb.ingestBuffer('tender.md', Buffer.from(body));
+  try {
+    const q = '采购流程相关材料如何递交';
+    const hit = await post(`http://localhost:${port}/api/chat`, { query: q, domain: 'general' });
+    assert.strictEqual(hit.status, 200);
+    const ex = hit.body.citations[0].excerpt;
+    assert.strictEqual(ex.length, 161, 'exactly 160 windowed chars plus one leading ellipsis');
+    assert.ok(ex.startsWith('…'), 'a truncated head is marked with a leading ellipsis');
+    assert.ok(ex.includes('采购'), 'the excerpt must contain the hit anchor, not the doc head');
+    assert.ok(!ex.endsWith('…'), 'the excerpt reaches the doc tail, so no trailing ellipsis');
+    assert.deepStrictEqual(
+      hit.body,
+      kb.answer(q, { domain: 'general', limit: 3 }),
+      'the wire body is still exactly the engine answer'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/admin/stats body is exactly { stats: { total, with_answer } } — full-payload lock', async () => {
   const { kb, server, port } = await startServer();
   // admin.js renders 总查询数/命中数/命中率 straight from stats.total and
