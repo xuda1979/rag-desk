@@ -2504,6 +2504,32 @@ test('demo.js auto-sync chain: response parse, fillSelect apply, re-render tail 
   }
 });
 
+test('widget.js resolves its own script tag via currentScript with a getElementsByTagName fallback, then reads data-* attrs from it', async () => {
+  const { kb, server, port } = await startServer();
+  // The data-attribute wiring test locks what the widget READS (data-api,
+  // data-domain, ...) but not WHERE it reads them from. That medium matters:
+  // the script element is located by `document.currentScript ||` a scan of the
+  // document's script tags taking the last one — without this binding the
+  // currentScript-less path (older engines / injected embeds) would read
+  // data-* attributes off the wrong element and silently fall back to
+  // defaults. Dropping any link yanks the widget's configuration source.
+  try {
+    const res = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(res.status, 200);
+    // modern path: currentScript points at the executing script element
+    assert.ok(res.body.includes("var script = document.currentScript || (function () {"), 'the widget must bind currentScript first');
+    // fallback path: enumerate script tags and take the last (the embed itself)
+    assert.ok(res.body.includes("var s = document.getElementsByTagName('script');"), 'the fallback must enumerate script tags');
+    assert.ok(res.body.includes('return s[s.length - 1];'), 'the fallback must select the last script tag');
+    assert.ok(res.body.includes('})();'), 'the fallback IIFE must be invoked inline');
+    // the binding is what feeds the attribute reads, completing the chain
+    assert.ok(res.body.includes("script.getAttribute('data-api')"), 'the resolved script element must be the data-api attribute source');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('widget.js mounts the FAB and panel as appended DOM nodes with stable ids the injected CSS selects on, and closes the panel on the X', async () => {
   const { kb, server, port } = await startServer();
   // The self-contained-embed test locks the style injection and panel chrome;
