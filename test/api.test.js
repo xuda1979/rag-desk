@@ -1676,6 +1676,36 @@ test('static page script boot: demo.js/admin.js serve as JS and pages srce them 
   }
 });
 
+test('/style.css serves as CSS and both statically served pages link it', async () => {
+  const { kb, server, port } = await startServer();
+  // Neither page hides its layout in inline styles — both link /style.css; if
+  // express.static stopped serving the file (or the link tags were dropped),
+  // both UIs would render unstyled while the element-id and script tests pass.
+  try {
+    const css = await get(`http://localhost:${port}/style.css`);
+    assert.strictEqual(css.status, 200);
+    assert.match(css.headers['content-type'], /text\/css/, 'style.css must serve as CSS');
+    // byte-exact Content-Length is what express.static sets on file responses
+    assert.strictEqual(css.headers['content-length'], String(Buffer.byteLength(css.body)), 'style.css Content-Length must match its bytes');
+    // keep a couple of distinctive rules so a rename/regeneration is visible:
+    // :root theme vars, the two shells, and one badge state the UIs color by
+    assert.ok(css.body.includes(':root {'), 'style.css must keep its theme variables');
+    assert.ok(css.body.includes('.demo-shell'), 'style.css must keep the demo layout rules');
+    assert.ok(css.body.includes('.admin-shell'), 'style.css must keep the admin layout rules');
+    assert.ok(css.body.includes('.badge-on'), 'style.css must keep the badge-on state used by both pages');
+
+    const idx = await get(`http://localhost:${port}/`);
+    assert.strictEqual(idx.status, 200);
+    assert.ok(idx.body.includes('<link rel="stylesheet" href="/style.css"'), 'demo page must link the served stylesheet');
+    const admin = await get(`http://localhost:${port}/admin`);
+    assert.strictEqual(admin.status, 200);
+    assert.ok(admin.body.includes('<link rel="stylesheet" href="/style.css"'), 'admin page must link the served stylesheet');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo page wiring: chat body shape, error surfacing, domains auto-sync and XSS escape', async () => {
   const { kb, server, port } = await startServer();
   // demo.js is the demo page's only client logic (widget.js has three source
