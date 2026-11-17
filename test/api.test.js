@@ -2058,6 +2058,37 @@ test('demo page badges and subtitle keep claiming the offline engine the /api/he
   }
 });
 
+test('demo example chips fill the input and submit via requestSubmit; widget FAB toggles the panel and seeds the greeting once', async () => {
+  const { kb, server, port } = await startServer();
+  // The demo's suggested-question chips are the page's only one-click chat
+  // path: each chip label comes from the active domain preset, click fills the
+  // input and submits the form (going through the same trim/pending/error
+  // pipeline as typed questions). The widget's FAB click toggles the panel and
+  // seeds the greeting bubble only on the first open.
+  try {
+    const demo = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(demo.status, 200);
+    // chips render from the active domain preset; a missing preset degrades to {} not a throw
+    assert.ok(demo.body.includes('const d = domains[domainSelect.value] || {};'), 'example lookup must degrade to {} for unknown domains');
+    assert.ok(demo.body.includes('for (const q of d.examples || []) {'), 'examples must come from the active domain preset');
+    assert.ok(demo.body.includes('b.textContent = q;'), 'chip label must be the raw example text');
+    // clicking fills the input and submits the form through the normal pipeline
+    assert.ok(demo.body.includes('input.value = q;'), 'chip click must fill the input');
+    assert.ok(demo.body.includes('form.requestSubmit();'), 'chip click must submit the form');
+
+    const widget = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(widget.status, 200);
+    // the floating button is a literal glyph, and clicking toggles the panel
+    assert.ok(widget.body.includes("fab.textContent = '\u{1F4AC}';"), 'FAB must render the chat glyph');
+    assert.ok(widget.body.includes('panel.classList.toggle(\'open\')'), 'FAB click must toggle the panel open state');
+    // the greeting seeds only on the first open, so reopening keeps history
+    assert.ok(widget.body.includes('if (open && body.children.length === 0) addMsg(\'bot\', esc(GREETING));'), 'greeting must seed only on first open');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('static pages served', async () => {
   const { kb, server, port } = await startServer();
   const idx = await get(`http://localhost:${port}/`);
