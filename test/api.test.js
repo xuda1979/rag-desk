@@ -1190,6 +1190,59 @@ test('wrong method on a known API path returns the stable JSON 404, not HTML', a
   }
 });
 
+test('OPTIONS without an Origin is not a preflight — real routes JSON 404, no CORS headers; bare /api prefix 404s as JSON too', async () => {
+  const { kb, server, port } = await startServer();
+  // The CORS middleware only short-circuits an OPTIONS that CARRIES an Origin
+  // (a real browser preflight); a bare OPTIONS from a non-browser client must
+  // behave like any other unregistered verb and fall through to the /api JSON
+  // catch-all. Existing preflight tests always send Origin and unknown-path
+  // tests use /api/nope, so both the no-Origin OPTIONS branch and the bare
+  // /api (and trailing-slash) prefix are unasserted on the wire.
+  const request = (method, path, origin) =>
+    new Promise((resolve, reject) => {
+      const headers = origin ? { Origin: origin } : {};
+      const r = http.request({ host: 'localhost', port, path, method, headers }, (res) => {
+        let out = '';
+        res.on('data', (c) => (out += c));
+        res.on('end', () =>
+          resolve({
+            status: res.statusCode,
+            acao: res.headers['access-control-allow-origin'],
+            ct: res.headers['content-type'],
+            body: out,
+          })
+        );
+      });
+      r.on('error', reject);
+      r.end();
+    });
+
+  try {
+    // sans-Origin OPTIONS on real routes: the JSON 404 fallthrough, no CORS
+    for (const p of ['/api/chat', '/api/health', '/api/domains']) {
+      const r = await request('OPTIONS', p);
+      assert.strictEqual(r.status, 404, `OPTIONS ${p} without Origin must not preflight`);
+      assert.strictEqual(r.acao, undefined, `OPTIONS ${p} without Origin must not emit CORS headers`);
+      assert.deepStrictEqual(JSON.parse(r.body), { error: 'not found' }, `OPTIONS ${p} without Origin is the stable JSON 404`);
+    }
+    // contrast: the same OPTIONS with an Origin IS the 204 preflight
+    const pre = await request('OPTIONS', '/api/chat', 'https://widget.example');
+    assert.strictEqual(pre.status, 204, 'the same OPTIONS with an Origin is the 204 preflight');
+    assert.strictEqual(pre.acao, 'https://widget.example');
+
+    // the bare prefix and its trailing-slash variant hit the same catch-all
+    for (const p of ['/api', '/api/']) {
+      const r = await request('GET', p);
+      assert.strictEqual(r.status, 404, `GET ${p} must fall to the API catch-all`);
+      assert.match(r.ct, /application\/json/, `GET ${p} must answer JSON, never the HTML error page`);
+      assert.deepStrictEqual(JSON.parse(r.body), { error: 'not found' }, `GET ${p} must carry the stable JSON 404 body`);
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('HEAD on JSON API routes mirrors GET headers with zero body — 200s, JSON content-type, exact byte lengths; POST-only/unknown paths still 404 and gated routes still 401', async () => {
   const { kb, server, port } = await startServer({ adminToken: 'adm0' });
   // express answers HEAD by invoking the GET route then stripping the body, so
