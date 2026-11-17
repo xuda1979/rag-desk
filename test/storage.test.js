@@ -70,6 +70,37 @@ test('storage: FTS search finds CJK hits, respects limit, empty query yields non
   st.close();
 });
 
+test('storage: FTS5 syntax rejection degrades to a literal %…% LIKE scan — wildcards neutralized, docScores empty, metadata enriched', () => {
+  const { st } = tempStorage();
+  const docId = st.insertDoc({ filename: 'guide.md', kind: 'markdown', mime: null, size: 40, sha256: 'abc' });
+  st.insertChunks(docId, [
+    // A quoted CJK OR-group directly followed by a quoted number makes FTS5
+    // reject the MATCH query ("fts5: syntax error near \"78\""), so search()
+    // must fall back to a plain LIKE scan of chunks.body.
+    { index: 1, text: '问题78_甲号位于门诊楼二层。' }, // '_' genuine separator
+    { index: 2, text: '问题78 甲号位于门诊楼二层。' }, // literal space separator
+    { index: 3, text: '问题78甲号位于门诊楼二层。' },  // no separator
+  ]);
+  const r = st.search('问题78_甲号', 5);
+  // the '_' in the query is a LIKE wildcard: it must be neutralized, so the
+  // fallback matches the literal substring only in the space-separated chunk
+  assert.deepStrictEqual(
+    r.chunks.map((c) => c.chunkId),
+    [2],
+    'only the chunk whose body literally contains 问题78 甲号 matches'
+  );
+  assert.strictEqual(r.chunks[0].chunkIndex, 2);
+  assert.strictEqual(r.chunks[0].body, '问题78 甲号位于门诊楼二层。');
+  assert.strictEqual(r.chunks[0].score, 0, 'fallback rows carry a 0.0 score');
+  assert.strictEqual(r.chunks[0].filename, 'guide.md', 'the doc join still enriches filename');
+  assert.strictEqual(r.chunks[0].kind, 'markdown', 'the doc join still enriches kind');
+  assert.strictEqual(r.chunks[0].docId, docId);
+  assert.strictEqual(r.docScores.size, 0, 'the degrade path never fills doc scores');
+  // the fallback obeys LIMIT exactly like the FTS path
+  assert.strictEqual(st.search('问题78 甲号', 1).chunks.length, 1, 'limit honored on the LIKE path');
+  st.close();
+});
+
 test('storage: query log roundtrip, LEFT JOIN nulls and stats counts', () => {
   const { st } = tempStorage();
   st.logQuery({ query: 'q1', domain: 'legal', matched: 2, topScore: -5, topDocId: 777, source: 'api' });

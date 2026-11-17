@@ -187,7 +187,16 @@ class Storage {
          FROM chunks WHERE body LIKE ? COLLATE NOCASE
          LIMIT ?`
       ).all(like, limit);
-      return { chunks: rows, docScores: new Map() };
+      const chunks = rows.map((r) => ({
+        chunkId: r.chunk_id,
+        chunkIndex: r.chunk_idx,
+        body: r.body,
+        docId: r.doc_id,
+        filename: r.filename,
+        kind: r.kind,
+        score: r.score, // 0.0 on the degrade path
+      }));
+      return { chunks, docScores: new Map() };
     }
   }
 
