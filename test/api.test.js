@@ -64,7 +64,7 @@ function get(url) {
           try {
             body = JSON.parse(out);
           } catch (_) {}
-          resolve({ status: res.statusCode, body });
+          resolve({ status: res.statusCode, headers: res.headers, body });
         });
       })
       .on('error', reject);
@@ -1279,6 +1279,40 @@ test('static pages carry the element ids demo.js and admin.js read at startup', 
     for (const id of ['file-input', 'upload-btn', 'upload-result', 'stats', 'docs-body', 'chunks-card', 'chunks-doc', 'chunks-body', 'logs-body']) {
       assert.ok(admin.body.includes(`id="${id}"`), `admin page must carry id="${id}"`);
     }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
+test('static page script boot: demo.js/admin.js serve as JS and pages srce them with exact titles', async () => {
+  const { kb, server, port } = await startServer();
+  // The demo and admin pages boot via <script src="/demo.js|admin.js">; if
+  // those assets were renamed/moved (widget.js IS locked, these two are not),
+  // the pages would silently load with no behavior. Lock their 200/JS-MIME
+  // serving plus the pages' <title> and <script src> so a rewire stays visible.
+  try {
+    const demoJs = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(demoJs.status, 200);
+    assert.match(demoJs.headers['content-type'], /application\/javascript/);
+    assert.match(demoJs.body, /ask-form|domain-select/, 'demo.js must keep its chat-driving logic');
+
+    const adminJs = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(adminJs.status, 200);
+    assert.match(adminJs.headers['content-type'], /application\/javascript/);
+    assert.match(adminJs.body, /upload-btn|docs-body/, 'admin.js must keep its admin-driving logic');
+
+    const idx = await get(`http://localhost:${port}/`);
+    assert.strictEqual(idx.status, 200);
+    assert.match(idx.headers['content-type'], /text\/html/);
+    assert.ok(idx.body.includes('<title>RAG-Desk · 离线知识问答演示</title>'), 'demo page must keep its exact title');
+    assert.ok(idx.body.includes('<script src="/demo.js"></script>'), 'demo page must src the served demo.js');
+
+    const admin = await get(`http://localhost:${port}/admin`);
+    assert.strictEqual(admin.status, 200);
+    assert.match(admin.headers['content-type'], /text\/html/);
+    assert.ok(admin.body.includes('<title>RAG-Desk · 管理后台</title>'), 'admin page must keep its exact title');
+    assert.ok(admin.body.includes('<script src="/admin.js"></script>'), 'admin page must src the served admin.js');
   } finally {
     server.close();
     kb.close();
