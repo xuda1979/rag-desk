@@ -2160,6 +2160,59 @@ test('demo.js and widget.js emit the exact class names the stylesheets style for
   }
 });
 
+test('static page skeletons carry the exact headings, form controls and table headers the scripts render into', async () => {
+  const { kb, server, port } = await startServer();
+  // The element-id test proves demo.js/admin.js can FIND their hooks; this one
+  // locks what the pages present around those hooks: the upload control shape,
+  // the <thead> column contracts the row renderers fill (admin.js writes 8
+  // cells per docs row and 6 per logs row), the chunks card staying hidden
+  // until "查看分块", and the demo ask form's submit wiring. A rewire that
+  // drops a header column without touching admin.js leaves a shifted table.
+  try {
+    const admin = await get(`http://localhost:${port}/admin`);
+    assert.strictEqual(admin.status, 200);
+    assert.ok(admin.body.includes('<h1>RAG-Desk 管理后台</h1>'), 'admin page must keep its page heading');
+    assert.ok(admin.body.includes('<p class="subtitle">上传文档 · 查看索引 · 查询日志</p>'), 'admin page must keep its subtitle');
+    assert.ok(admin.body.includes('<h2>上传文档</h2>'), 'admin must keep the upload card heading');
+    assert.ok(admin.body.includes('<h2>索引状态</h2>'), 'admin must keep the stats card heading');
+    assert.ok(admin.body.includes('<h2>已索引文档</h2>'), 'admin must keep the docs card heading');
+    assert.ok(admin.body.includes('<h2>分块预览'), 'admin must keep the chunks card heading');
+    assert.ok(admin.body.includes('<h2>查询日志</h2>'), 'admin must keep the logs card heading');
+    // upload control: the input must accept multiple files and the button must
+    // keep the exact label the upload-result copy echoes
+    assert.ok(admin.body.includes('<input type="file" id="file-input" multiple'), 'upload input must accept multiple files');
+    assert.ok(admin.body.includes('<button id="upload-btn">上传并索引</button>'), 'admin must keep the upload button');
+    // the chunks card must START hidden; admin.js reveals it on 查看分块 only
+    assert.ok(admin.body.includes('<div class="admin-card" id="chunks-card" hidden>'), 'chunks card must start hidden');
+    // docs thead must stay column-compatible with loadDocs' 8-cell rows (the
+    // colspan="2" covers the view/delete action buttons)
+    assert.ok(
+      admin.body.includes('<tr><th>ID</th><th>文件名</th><th>类型</th><th>分块</th><th>大小</th><th>上传时间</th><th colspan="2"></th></tr>'),
+      'docs thead must keep its six labeled columns plus the two action cells'
+    );
+    // logs thead must match loadLogs' six rendered cells exactly
+    assert.ok(
+      admin.body.includes('<tr><th>时间</th><th>查询</th><th>领域</th><th>命中</th><th>置信度</th><th>来源文档</th></tr>'),
+      'logs thead must keep its six labeled columns'
+    );
+
+    const idx = await get(`http://localhost:${port}/`);
+    assert.strictEqual(idx.status, 200);
+    assert.ok(idx.body.includes('<h1>RAG-Desk</h1>'), 'demo page must keep its heading');
+    assert.ok(idx.body.includes('<label for="domain-select">领域预设：</label>'), 'demo page must label the domain select');
+    // the ask form must submit via a submit button (click AND Enter both fire
+    // form submit, which is the only path demo.js listens on)
+    assert.ok(idx.body.includes('<form id="ask-form" class="ask-bar">'), 'demo page must keep the ask form wrapper');
+    assert.ok(idx.body.includes('<input id="ask-input" type="text"'), 'demo ask input must stay a text field');
+    assert.ok(idx.body.includes('autocomplete="off"'), 'demo ask input must disable browser autofill');
+    assert.ok(idx.body.includes('<button type="submit">发送</button>'), 'demo form must keep its submit-send button');
+    assert.ok(idx.body.includes('<div id="examples" class="examples dim"></div>'), 'demo page must keep the examples container');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
   const { kb, server, port } = await startServer();
   // The demo page's domain <select> and example chips are driven by demo.js:
