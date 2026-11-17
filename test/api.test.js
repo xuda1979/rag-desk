@@ -1252,6 +1252,58 @@ test('wrong method on a known API path returns the stable JSON 404, not HTML', a
   }
 });
 
+test('wrong method on a token-gated admin path 401s first — the gate fires before the verb 404; a valid token then lands on the stable JSON 404', async () => {
+  const { kb, server, port } = await startServer({ adminToken: 'adm0' });
+  // The plain wrong-method test above runs an UNTOKENIZED server, so every verb
+  // falls straight through to the /api catch-all. Here the admin gate must
+  // instead reject a tokenless wrong-verb probe BEFORE the 404 lookup — the
+  // client must see the gate's 401 body, never a leaked not-found body — and a
+  // valid token must then fall to the exact JSON 404 an untokenized server
+  // returns. A refactor that moves the catch-all ahead of assertAdmin would
+  // silently flip these responses to 404.
+  const req = (method, reqPath, headers = {}) =>
+    new Promise((resolve, reject) => {
+      const r = http.request({ host: 'localhost', port, path: reqPath, method, headers }, (res) => {
+        let out = '';
+        res.on('data', (c) => (out += c));
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(out || '{}') }));
+      });
+      r.on('error', reject);
+      r.end();
+    });
+  try {
+    // every case is a verb the target route does NOT register; POST
+    // /api/admin/upload is excluded because it is a real route (its 401-vs-400
+    // auth behavior is locked elsewhere).
+    const cases = [
+      { method: 'POST', path: '/api/admin/docs/1' },
+      { method: 'PATCH', path: '/api/admin/stats' },
+      { method: 'DELETE', path: '/api/admin/logs' },
+      { method: 'PUT', path: '/api/admin/docs' },
+      { method: 'GET', path: '/api/admin/upload' },
+    ];
+    for (const c of cases) {
+      const noTok = await req(c.method, c.path);
+      assert.strictEqual(noTok.status, 401, `${c.method} ${c.path} without a token must 401 (gate precedes the verb 404)`);
+      assert.deepStrictEqual(
+        noTok.body,
+        { error: 'unauthorized: missing or invalid x-admin-token' },
+        `${c.method} ${c.path} must return the gate's 401 body, never the not-found body`
+      );
+      const withTok = await req(c.method, c.path, { 'x-admin-token': 'adm0' });
+      assert.strictEqual(withTok.status, 404, `${c.method} ${c.path} with the token must fall to the stable JSON 404`);
+      assert.deepStrictEqual(
+        withTok.body,
+        { error: 'not found' },
+        `${c.method} ${c.path} with the token keeps the same 404 body as an untokenized server`
+      );
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('OPTIONS without an Origin is not a preflight — real routes JSON 404, no CORS headers; bare /api prefix 404s as JSON too', async () => {
   const { kb, server, port } = await startServer();
   // The CORS middleware only short-circuits an OPTIONS that CARRIES an Origin
