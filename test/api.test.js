@@ -269,6 +269,41 @@ test('server-side: unknown domain falls back to general preset', async () => {
   kb.close();
 });
 
+test('server-side: /api/chat coerces non-string domain values to general instead of crashing', async () => {
+  const { kb, server, port } = await startServer();
+  // query and limit already have coercion locks, but domain is the last input
+  // dimension: a JSON client may send numbers/bools/objects and the route must
+  // reach getDomain() (DOMAINS[id] || general) without a 500. Values that
+  // stringify to no known preset degrade to general; the miss phrase must prove
+  // the general preset actually drove the answer, not just the echoed id.
+  // Empty corpus + ASCII query = deterministic miss.
+  try {
+    for (const domain of [null, 123, true, {}, [], 0, 'no-such-domain']) {
+      const miss = await post(`http://localhost:${port}/api/chat`, { query: 'qqqzzz xxx', domain });
+      assert.strictEqual(miss.status, 200, `domain ${JSON.stringify(domain)} must not crash the engine`);
+      assert.strictEqual(miss.body.domain, 'general', `domain ${JSON.stringify(domain)} must degrade to general`);
+      assert.strictEqual(
+        miss.body.answer,
+        '抱歉，知识库中没有找到相关内容。',
+        `domain ${JSON.stringify(domain)} must phrase with the general fallback`
+      );
+    }
+
+    // a non-string value that String()-coerces to a real preset id is honored,
+    // pinning the DOMAINS[id] lookup (not a typeof guard) as the contract
+    const arr = await post(`http://localhost:${port}/api/chat`, { query: 'qqqzzz xxx', domain: ['legal'] });
+    assert.strictEqual(arr.status, 200);
+    assert.strictEqual(arr.body.domain, 'legal', '["legal"] coerces via String() to the "legal" preset id');
+    assert.ok(
+      arr.body.answer.startsWith('抱歉，我在知识库中暂未找到'),
+      '["legal"] must phrase with the legal fallback, proving the preset was honored'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('server-side: a valid domain selection is honored in the answer phrasing on the wire', async () => {
   const { kb, server, port } = await startServer();
   // demo.js always sends domainSelect.value (default 'general') with every
