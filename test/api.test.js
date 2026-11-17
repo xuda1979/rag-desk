@@ -2283,6 +2283,32 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('admin.js loadDocs: the docs-stats composition stays intact — Array.isArray payload guard, reduce-sum of per-row chunk_count feeding the 分块 stat, clear-before-render, and the five escaped info cells of every row', async () => {
+  const { kb, server, port } = await startServer();
+  // The stats tags, the KB size cell and the two action buttons are pinned, but
+  // the arithmetic feeding them is not: the 分块 stat is a reduce-sum of each
+  // row's chunk_count (a rewire to plain docs.length would silently stop
+  // counting chunks), the Array.isArray guard keeps a non-array payload from
+  // crashing every row and both stats at once, and the cells for id, kind and
+  // chunk_count are raw numbers while filename and created_at are user-authored
+  // strings that must stay escaped. The table must also be cleared before the
+  // rows render so a refresh never stacks old rows beneath new ones.
+  try {
+    const res = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(res.status, 200);
+    assert.ok(res.body.includes('const docs = Array.isArray(data.docs) ? data.docs : [];'), 'loadDocs must guard the docs payload shape');
+    assert.ok(res.body.includes('docs.reduce((s, d) => s + (d.chunk_count || 0), 0)'), 'the 分块 stat must sum each row chunk_count');
+    assert.ok(res.body.includes("docsBody.innerHTML = '';"), 'loadDocs must clear the table before rendering rows');
+    assert.ok(res.body.includes('for (const d of docs) {'), 'loadDocs must iterate the docs rows');
+    assert.ok(res.body.includes('<td>${d.id}</td><td>${esc(d.filename)}</td><td>${d.kind}</td>'), 'row info cells must carry id, escaped filename and kind in order');
+    assert.ok(res.body.includes("<td>${d.chunk_count}</td><td>${size}</td><td>${esc(d.created_at || '')}</td>"), 'row cells must carry the count, KB size and escaped created_at in order');
+    assert.ok(res.body.includes('docsBody.appendChild(tr);'), 'each built docs row must be appended to the table body');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin.js loadLogs: each log row is a fresh <tr> composing six escaped/fallback columns — created_at, query, domain, matched, top_score and top_filename — before append', async () => {
   const { kb, server, port } = await startServer();
   // The wire shapes of the log columns are locked at the API level and the
