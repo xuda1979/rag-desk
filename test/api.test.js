@@ -198,6 +198,61 @@ test('server-side: /api/chat coerces non-string queries and 400s falsy ones', as
   }
 });
 
+test('server-side: /api/chat never 500s on top-level non-object JSON bodies — primitives are parser errors, arrays are blank 400s', async () => {
+  const { kb, server, port } = await startServer();
+  // express.json() runs in strict mode: a top-level primitive (null/false/0/
+  // string/number) is rejected by the PARSER itself with its own 400 message,
+  // while a top-level ARRAY passes strict mode and falls through to the route,
+  // where the missing query surfaces the shared blank-query 400. Both classes
+  // must stay stable JSON 400s (never a destructuring 500), and neither may be
+  // logged or counted. The existing malformed-JSON test covers syntax errors
+  // ('{bad json'); this locks the strict-mode primitive branch + the array
+  // branch that syntax-error tests cannot reach.
+  const sendJson = (rawJson, origin) =>
+    new Promise((resolve, reject) => {
+      const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(rawJson) };
+      if (origin) headers.Origin = origin;
+      const req = http.request(
+        { host: 'localhost', port, path: '/api/chat', method: 'POST', headers },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () =>
+            resolve({
+              status: r.statusCode,
+              body: JSON.parse(out || '{}'),
+              acao: r.headers['access-control-allow-origin'],
+            })
+          );
+        }
+      );
+      req.on('error', reject);
+      req.write(rawJson);
+      req.end();
+    });
+  try {
+    // 1. top-level primitives are parser-level (strict-mode) rejections
+    for (const rawJson of ['null', 'false', '0', '""', '"abc"', '123', 'true']) {
+      const r = await sendJson(rawJson, 'https://customer.example');
+      assert.strictEqual(r.status, 400, `bare ${rawJson} must be rejected before the route, not 500`);
+      assert.match(r.body.error, /Unexpected token/, 'strict-mode primitive rejection surfaces the parser message');
+      assert.strictEqual(r.acao, 'https://customer.example', 'CORS header rides on the strict-mode parser error too');
+    }
+    // 2. top-level arrays pass strict mode and hit the route blank-query guard
+    for (const rawJson of ['[]', '[1]', '[{"query":"x"}]']) {
+      const r = await sendJson(rawJson);
+      assert.strictEqual(r.status, 400, `bare ${rawJson} must 400, not 500`);
+      assert.deepStrictEqual(r.body, { error: 'query is required' }, 'array bodies share the exact shared 400 literal');
+    }
+    // 3. nothing was logged or counted for any rejected body
+    const stats = await get(`http://localhost:${port}/api/admin/stats`);
+    assert.deepStrictEqual(stats.body.stats, { total: 0, with_answer: 0 }, 'rejected non-object bodies are not counted');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('server-side: /api/chat accepts x-www-form-urlencoded bodies (urlencoded middleware)', async () => {
   // express.urlencoded({ extended: false }) is a common consumer-client
   // encoding (plain form posts); the chat route must parse it exactly like
