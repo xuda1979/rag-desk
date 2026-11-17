@@ -2452,6 +2452,29 @@ test('page-chrome skin: the .demo-header h1/.subtitle/.badges/.badge/.badge-off 
   }
 });
 
+test('admin.js token gate client-side: the token lives in localStorage under ragdesk-admin-token, rides every adminFetch in exactly the x-admin-token header the server gate reads, is persisted after a successful prompt and forgotten when the prompt is cancelled', async () => {
+  // The wire tests lock the server gate reading only x-admin-token and the
+  // source lock above pins the one-shot prompt/retry. The client side of that
+  // gate — where the token is stored, which header it rides on, and how prompt
+  // success/cancel updates storage — is unpinned. A rewire that stores the
+  // token under another key, sends it as Authorization (which the gate
+  // ignores), or keeps it after a cancelled prompt would silently break admin
+  // auth across page loads while every wire test still passes.
+  const { kb, server, port } = await startServer();
+  try {
+    const res = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(res.status, 200);
+    assert.ok(res.body.includes("const TOKEN_KEY = 'ragdesk-admin-token';"), 'the token key must stay the ragdesk-admin-token storage key');
+    assert.ok(res.body.includes("let token = localStorage.getItem(TOKEN_KEY) || '';"), 'admin.js must read a saved token at boot');
+    assert.ok(res.body.includes("if (token) headers['x-admin-token'] = token;"), 'every adminFetch must carry the token in exactly the x-admin-token header');
+    assert.ok(res.body.includes('localStorage.setItem(TOKEN_KEY, token);'), 'a successfully entered token must be persisted for the next page load');
+    assert.ok(res.body.includes('localStorage.removeItem(TOKEN_KEY);'), 'a cancelled prompt must forget any saved token');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
   const { kb, server, port } = await startServer();
   // The demo page's domain <select> and example chips are driven by demo.js:
