@@ -1965,6 +1965,36 @@ test('chat POST target wiring: widget.js fetches the data-api endpoint, demo.js 
   }
 });
 
+test('client submit guards: blank/whitespace questions never fire a request, demo shows a pending bubble, widget binds click+Enter to submit', async () => {
+  const { kb, server, port } = await startServer();
+  // The wire 400s for blank/whitespace queries (locked elsewhere) are purely
+  // defensive: both client scripts trim their input and return before any
+  // fetch, so a user typing spaces or nothing makes zero requests. A rewire
+  // that dropped the guard would silently spam /api/chat with 400-able junk.
+  // The demo also shows a pending bubble while the request is in flight.
+  try {
+    const widget = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(widget.status, 200);
+    assert.match(widget.body, /var q = input\.value\.trim\(\);\n\s*if \(!q\) return;/, 'widget submit must trim and refuse blank/whitespace');
+    // the two widget submit triggers: send button click and Enter in the input
+    assert.ok(widget.body.includes("sendBtn.addEventListener('click', submit);"), 'widget send button must submit');
+    assert.ok(widget.body.includes("if (e.key === 'Enter') submit();"), 'widget Enter key must submit');
+
+    const demo = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(demo.status, 200);
+    assert.match(demo.body, /const q = input\.value\.trim\(\);/);
+    assert.match(demo.body, /if \(!q\) return;/, 'demo submit must trim and refuse blank/whitespace');
+    // pending-state bubble: captured so success/error can replace it
+    assert.ok(
+      demo.body.includes("const thinking = addMsg('bot', '正在检索知识库…');"),
+      'demo must show a pending bubble while the chat request is in flight'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('static pages served', async () => {
   const { kb, server, port } = await startServer();
   const idx = await get(`http://localhost:${port}/`);
