@@ -2283,6 +2283,27 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('admin.js upload: the batch-results render is guarded and followed by a table refresh — (data.results || []) read, the .map per-action opener, and loadDocs() after the join', async () => {
+  const { kb, server, port } = await startServer();
+  // The three action branches, the unknown-action verbatim line, the ；join,
+  // the network catch and the button re-enables are all pinned. What is not
+  // locked is the control flow around them: the upload reads the results with
+  // a missing-array guard (a payload without results must clear the message
+  // instead of throwing), and after rendering the batch it calls loadDocs() so
+  // the just-uploaded rows appear in the table and the stats card recomputes —
+  // that refresh is distinct from the boot-time loadDocs()/loadLogs() line.
+  try {
+    const res = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(res.status, 200);
+    assert.ok(res.body.includes('uploadResult.textContent = (data.results || [])'), 'the batch results must be read with a missing-array guard');
+    assert.ok(res.body.includes('.map((r) => {'), 'the results must be mapped per action row');
+    assert.match(res.body, /\.join\('；'\);\n\s*loadDocs\(\);/, 'after rendering the batch the docs table must refresh without a manual reload');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin.js loadDocs: the docs-stats composition stays intact — Array.isArray payload guard, reduce-sum of per-row chunk_count feeding the 分块 stat, clear-before-render, and the five escaped info cells of every row', async () => {
   const { kb, server, port } = await startServer();
   // The stats tags, the KB size cell and the two action buttons are pinned, but
