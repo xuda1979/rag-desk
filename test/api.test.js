@@ -2475,6 +2475,35 @@ test('admin.js token gate client-side: the token lives in localStorage under rag
   }
 });
 
+test('demo.js auto-sync chain: response parse, fillSelect apply, re-render tail and the empty .catch that guards the offline FALLBACK', async () => {
+  const { kb, server, port } = await startServer();
+  // The domains-sync test locks the guard and preset-map build but stops at
+  // map[d.id] assignment. The chain's remaining links decide whether the sync
+  // actually AFFECTS the page: the fetched payload must be parsed as JSON,
+  // applied through fillSelect (which rebuilds the <select> from the server
+  // list) and re-rendered for the new preset, and the trailing .catch(() => {})
+  // must swallow network failures so the in-page FALLBACK presets keep the
+  // demo functional when /api/domains is unreachable. Drop any link and the
+  // page either ignores server presets or breaks offline.
+  try {
+    const res = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(res.status, 200);
+    // response must actually be decoded before the payload guard runs
+    assert.ok(res.body.includes('.then((r) => r.json())'), 'the sync must parse the /api/domains response as JSON');
+    // the built map is applied by rebuilding the select from the server list
+    assert.ok(res.body.includes('fillSelect(data.domains);'), 'the sync must rebuild the select from the fetched list');
+    // after applying, the page re-renders so the greeting/chips match the
+    // (possibly preserved) selection against the fresh presets
+    assert.ok(res.body.includes('renderFor(domainSelect.value);'), 'the sync must re-render after applying the fetched list');
+    // the final .catch swallows sync failures silently — a throw here would
+    // break the demo page even though FALLBACK presets are fully usable
+    assert.ok(res.body.includes('.catch(() => {});'), 'the sync must swallow fetch failures so FALLBACK stays active');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('widget.js mounts the FAB and panel as appended DOM nodes with stable ids the injected CSS selects on, and closes the panel on the X', async () => {
   const { kb, server, port } = await startServer();
   // The self-contained-embed test locks the style injection and panel chrome;
