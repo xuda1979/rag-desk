@@ -1085,3 +1085,54 @@ test('prod: browser clients (admin.js / demo.js) read exactly the JSON keys the 
   assert.ok(demoSrc.includes("data.mode === 'offline-retrieval'"), 'demo must branch on the offline mode tag');
   assert.ok(demoSrc.includes("JSON.stringify({ query: q, domain: domainSelect.value })"), 'demo must submit query + domain to /api/chat');
 });
+
+test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
+  // package.json is the operator-facing install/run contract: npm start / npm
+  // seed / npm test are the exact commands README.md and Dockerfile document.
+  // A drifted entrypoint (renamed script file, changed engine floor or test
+  // glob) would ship a doc that can no longer be executed as written.
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
+
+  // ---- `main` must point at the exact file `npm start` runs
+  assert.strictEqual(pkg.main, 'src/server.js', 'pkg.main must be src/server.js');
+  assert.match(pkg.scripts.start, /src\/server\.js/, 'start script must launch src/server.js as main declares');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', pkg.main)), 'pkg.main file must exist');
+
+  // ---- every script entry must target a real file
+  for (const scriptName of ['start', 'seed', 'test']) {
+    assert.ok(pkg.scripts[scriptName], `package.json must define the ${scriptName} script`);
+  }
+  assert.match(pkg.scripts.seed, /scripts\/seed-fixtures\.js/, 'seed script must run scripts/seed-fixtures.js');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'scripts', 'seed-fixtures.js')), 'seed entrypoint must exist');
+  assert.match(pkg.scripts.test, /--test/, 'test script must use the node test runner');
+  assert.match(pkg.scripts.test, /test\/\*\.test\.js/, 'test script must match test/*.test.js as the suite layout');
+
+  // ---- engines floor: README documents Node.js >= 22.5, Dockerfile pins 22-bookworm-slim
+  assert.strictEqual(pkg.engines.node, '>=22.5.0', 'engines floor must stay >=22.5.0');
+  assert.match(readme, /22\.5/, 'README must document the Node.js >= 22.5 requirement');
+  assert.match(dockerfile, /FROM node:22-bookworm-slim/, 'Dockerfile must stay on the node:22 base the engine floor implies');
+
+  // ---- devDependencies stay build-stage-only: src/ runtime must not need pdfkit
+  assert.ok(pkg.devDependencies.pdfkit, 'pdfkit must remain a devDependency (fixture build tool)');
+  const srcText = fs
+    .readdirSync(path.join(__dirname, '..', 'src'), { recursive: true })
+    .filter((p) => p.endsWith('.js'))
+    .map((p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8'))
+    .join('\n');
+  assert.doesNotMatch(srcText, /require\(['"]pdfkit['"]\)/, 'src/ must never require the dev-only pdfkit at runtime');
+
+  // ---- documented commands must be exactly the scripts that exist
+  // README's quick-start (npm install / npm start / npm run seed) is the same
+  // surface Dockerfile's CMD (npm start) and the test suite (npm test) use.
+  assert.match(readme, /npm start/, 'README must direct operators to npm start');
+  assert.match(readme, /npm run seed/, 'README must document the seed step');
+  assert.match(readme, /npm test/, 'README must document the test command');
+  // Dockerfile CMD carries the same expanded command the start script defines
+  assert.match(dockerfile, new RegExp(`CMD \\["${pkg.scripts.start.split(' ').join('", "')}"\\]`), 'Dockerfile CMD must stay the expanded npm start command');
+  assert.ok(
+    dockerfile.indexOf('CMD ["node", "--disable-warning=ExperimentalWarning", "src/server.js"]') > dockerfile.indexOf('FROM node:22-bookworm-slim AS runtime'),
+    'CMD must belong to the runtime stage'
+  );
+});
