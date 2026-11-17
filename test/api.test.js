@@ -2283,6 +2283,50 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('admin.js upload guard-and-error chain: empty selection no-ops, non-ok surfaces HTTP status with fallback text, unknown actions render verbatim and the table refreshes', async () => {
+  const { kb, server, port } = await startServer();
+  // The wire tests lock /api/admin/upload's statuses (indexed/duplicate/error)
+  // and the client test locks the pending text, the disabled toggles and the
+  // input reset. Still unpinned: (1) the empty-selection guard that makes
+  // click-with-no-file a silent no-op instead of a 400-able multipart POST,
+  // (2) the non-ok branch that surfaces HTTP status + server error or a
+  // fallback copy — the upload analog of the docs/logs load-error branch,
+  // (3) the unknown-action default so a future result kind still renders,
+  // (4) the ；（result separator and (5) the docs-table refresh that follows
+  // a successful batch so re-uploaded content shows up without a manual reload.
+  try {
+    const res = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(res.status, 200);
+    // empty selection: read the input's files, bail before any fetch (a rewire
+    // that dropped the guard would POST an empty multipart body to /api/chat's
+    // sibling and burn a 400 for a click the user never meant as a request)
+    assert.ok(res.body.includes('const files = Array.from(fileInput.files || []);'), 'upload must read the input file list');
+    assert.ok(res.body.includes('if (!files.length) return;'), 'upload must no-op on an empty file selection');
+    // non-ok responses surface the HTTP status plus the server error, falling
+    // back to a readable copy when the server sends no error field — mirroring
+    // the docs/logs load-error branch (locked separately) but on the upload path
+    assert.ok(
+      res.body.includes("uploadResult.textContent = `上传失败（HTTP ${res.status}）：${(data && data.error) || '服务器未返回错误详情'}`;"),
+      'upload must surface the HTTP status and server error on non-ok'
+    );
+    // the three result branches are already pinned; the unknown-action default
+    // keeps a future result kind visible instead of silently dropping the row
+    assert.ok(res.body.includes('return `${r.filename}: ${r.action}`;'), 'unknown upload actions must render verbatim');
+    // results are joined into one ；（separated line so a batch reads as one summary
+    assert.ok(res.body.includes(".join('；')"), 'batch results must join on the ；（separator');
+    // only after a successful batch does the docs table refresh (a rewire that
+    // skipped this would leave the admin list stale until a manual reload)
+    assert.match(
+      res.body,
+      /\.join\('；'\);\n      loadDocs\(\);/,
+      'a successful upload batch must refresh the docs table'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('widget.js error/answer render chain: HTTP-status fallback, newline-to-<br> and the meta+cites bubble composition', async () => {
   const { kb, server, port } = await startServer();
   // The token-gated 401 lock proves the widget gets a non-2xx path, and the
