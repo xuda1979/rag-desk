@@ -1641,6 +1641,95 @@ test('CORS preflight passes without credentials even when endpoint auth is on', 
   kb.close();
 });
 
+test('CORS preflight advertises the exact Allow-Methods and Allow-Headers sets the routes use', async () => {
+  const { kb, server, port } = await startServer({ adminToken: 'adm', chatToken: 'ch0' });
+  // The browsers that drive the widget (demo/chat) and the admin panel read the
+  // OPTIONS response to decide which method/headers the REAL request may carry:
+  // a preflight that stops advertising "x-admin-token" would silently turn the
+  // token-gated admin upload/DELETE into an indistinguishable CORS network
+  // failure (no console, blank panel). The existing preflight test pins only
+  // 204 + allow-origin; the parser-error (6ba71f0), actual-response (95206b3)
+  // and error-response (301e5ca) suites lock the same header pair on their own
+  // paths, so lock the pair on the preflight branch itself — pinned and
+  // reflected — with the exact server strings, and confirm the 204 body stays
+  // empty (res.end() after the header write, no content-type).
+  const preflight = (reqPath, requestMethod, origin, targetPort = port) =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: 'localhost',
+          port: targetPort,
+          path: reqPath,
+          method: 'OPTIONS',
+          headers: { Origin: origin, 'Access-Control-Request-Method': requestMethod },
+        },
+        (r) => {
+          r.resume();
+          r.on('end', () =>
+            resolve({
+              status: r.statusCode,
+              allowOrigin: r.headers['access-control-allow-origin'],
+              allowMethods: r.headers['access-control-allow-methods'],
+              allowHeaders: r.headers['access-control-allow-headers'],
+              contentType: r.headers['content-type'],
+            })
+          );
+        }
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  try {
+    // reflected-origin branches: chat POST and admin DELETE, both under active
+    // token gates that the preflight must NOT trip (browsers send no token yet)
+    for (const [reqPath, requestMethod] of [
+      ['/api/chat', 'POST'],
+      ['/api/admin/docs/1', 'DELETE'],
+      ['/api/health', 'GET'],
+    ]) {
+      const r = await preflight(reqPath, requestMethod, 'https://customer.example');
+      assert.strictEqual(r.status, 204, `${reqPath} preflight must answer 204 with no body`);
+      assert.strictEqual(r.allowOrigin, 'https://customer.example', `${reqPath} preflight reflects the origin`);
+      assert.strictEqual(
+        r.allowMethods,
+        'GET,POST,DELETE,OPTIONS',
+        `${reqPath} preflight must advertise exactly the methods the server routes support`
+      );
+      assert.strictEqual(
+        r.allowHeaders,
+        'Content-Type, x-admin-token, Authorization',
+        `${reqPath} preflight must advertise the x-admin-token/Authorization headers the gated routes read`
+      );
+      assert.strictEqual(r.contentType, undefined, `${reqPath} preflight ends with .end() and no content-type/length`);
+    }
+
+    // pinned branch: RAGDESK_ALLOW_ORIGIN emits the allow-origin verbatim while
+    // the method/header set is identical, so a pinned deploy still lets the
+    // browser preflight the same real request shape.
+    const app2 = buildApp(kb, { allowOrigin: 'https://pinned.example' });
+    const server2 = await new Promise((resolve) => {
+      const s = app2.listen(0, () => resolve(s));
+    });
+    try {
+      const pinned = await preflight(
+        '/api/admin/docs/1',
+        'DELETE',
+        'https://customer.example',
+        server2.address().port
+      );
+      assert.strictEqual(pinned.status, 204);
+      assert.strictEqual(pinned.allowOrigin, 'https://pinned.example', 'pinned preflight origin is emitted verbatim');
+      assert.strictEqual(pinned.allowMethods, 'GET,POST,DELETE,OPTIONS');
+      assert.strictEqual(pinned.allowHeaders, 'Content-Type, x-admin-token, Authorization');
+    } finally {
+      server2.close();
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('token-gated admin and chat endpoints reject without their tokens', async () => {
   const { kb, server, port } = await startServer({ adminToken: 'adm0', chatToken: 'ch0' });
   try {
