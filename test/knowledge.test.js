@@ -405,6 +405,28 @@ test('ingestDir returns per-file results; misses report errors, indexable files 
   kb.close();
 });
 
+test('ingestDir per-file catch surfaces thrown read errors (not just returned error objects)', async (t) => {
+  // A file the process cannot open makes ingestion *throw* (ENOENT is covered;
+  // here it is EACCES via chmod 000), which is caught per-file and turned into
+  // an error result instead of aborting the whole directory scan.
+  if (process.getuid && process.getuid() === 0) {
+    t.skip('chmod is ineffective when running as root');
+    return;
+  }
+  const kb = new KnowledgeBase(tempDb());
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ragdesk-lock-'));
+  fs.writeFileSync(path.join(dir, 'ok.md'), '律师咨询费按每小时 300 元收取。');
+  fs.writeFileSync(path.join(dir, 'locked.txt'), '不可读的内容');
+  fs.chmodSync(path.join(dir, 'locked.txt'), 0o000);
+  const res = await kb.ingestDir(dir);
+  const byName = Object.fromEntries(res.map((r) => [r.filename, r]));
+  assert.strictEqual(byName['ok.md'].action, 'indexed', 'readable files still index');
+  assert.strictEqual(byName['locked.txt'].action, 'error', 'a throw on read becomes a per-file error');
+  assert.match(byName['locked.txt'].error, /EACCES/, 'the thrown fs cause is carried through');
+  assert.strictEqual(kb.getAllDocs().length, 1, 'the readable doc is the only one stored');
+  kb.close();
+});
+
 test('settings persist across KnowledgeBase close/reopen; defaults when missing', () => {
   const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ragdesk-set-')), 'kb.db');
   const kb1 = new KnowledgeBase(dbPath);
