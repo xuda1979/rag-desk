@@ -261,6 +261,108 @@ test('prod: thrown engine errors become stable JSON 500s, not HTML stack traces'
   }
 });
 
+test('prod: body-less chat and deliberately-thrown app errors follow the stable JSON error contract', async () => {
+  // Leaf 97: a POST /api/chat with no body and no content-type leaves req.body
+  // undefined, so the `req.body || {}` destructure in the /api/chat handler
+  // substitutes {} and answers the same stable JSON 400 as an explicit blank.
+  {
+    const { kb, server, port } = await startServer();
+    try {
+      const bare = await req(port, { method: 'POST', reqPath: '/api/chat' });
+      assert.strictEqual(bare.status, 400);
+      assert.deepStrictEqual(bare.body, { error: 'query is required' });
+    } finally {
+      server.close();
+      kb.close();
+    }
+  }
+
+  // Leaf 187: an error carrying type 'entity.too.large' but no status/code
+  // (as a synthetic thrown payload can) must map to 413 with the body-parser
+  // message, not fall through to the 500 default.
+  {
+    const throwing = {
+      answer: () => {
+        throw { type: 'entity.too.large' };
+      },
+    };
+    const app = buildApp(throwing, {});
+    const tooLarge = await new Promise((resolve) => {
+      const s = app.listen(0, () => resolve(s));
+    });
+    try {
+      const port = tooLarge.address().port;
+      const res = await req(port, {
+        method: 'POST',
+        reqPath: '/api/chat',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: 'x' }),
+      });
+      assert.strictEqual(res.status, 413);
+      assert.deepStrictEqual(res.body, { error: 'request body too large' });
+    } finally {
+      tooLarge.close();
+    }
+  }
+
+  // Leaf 197: a thrown non-Error (a bare string) has neither .status nor
+  // .message, so the fallback message is the generic 'internal server error'.
+  {
+    const throwing = {
+      answer: () => {
+        throw 'boom-string';
+      },
+    };
+    const app = buildApp(throwing, {});
+    const improper = await new Promise((resolve) => {
+      const s = app.listen(0, () => resolve(s));
+    });
+    try {
+      const port = improper.address().port;
+      const res = await req(port, {
+        method: 'POST',
+        reqPath: '/api/chat',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: 'x' }),
+      });
+      assert.strictEqual(res.status, 500);
+      assert.deepStrictEqual(res.body, { error: 'internal server error' });
+      assert.match(res.headers['content-type'], /application\/json/);
+    } finally {
+      improper.close();
+    }
+  }
+
+  // Leaf 97: the `req.body || {}` destructure's falsy side is unreachable over
+  // HTTP (express body-parser always leaves req.body a truthy {}), so invoke
+  // the /api/chat handler directly with a null body, skipping the parsers.
+  {
+    const kb = new KnowledgeBase(freshDb());
+    try {
+      const app = buildApp(kb, {});
+      const route = app._router.stack.find((l) => l.route && l.route.path === '/api/chat');
+      assert.ok(route, '/api/chat route layer must exist');
+      const layers = route.route.stack;
+      const handle = layers[layers.length - 1].handle;
+      const sent = [];
+      const res = {
+        json: (o) => sent.push(['json', o]),
+        status: (c) => {
+          sent.push(['status', c]);
+          return res;
+        },
+      };
+      handle({ body: null, get: () => null }, res, () => {});
+      assert.deepStrictEqual(sent, [
+        ['status', 400],
+        ['json', { error: 'query is required' }],
+      ], 'a null body substitutes {} and answers the stable JSON 400');
+    } finally {
+      kb.close();
+    }
+  }
+});
+
 test('prod: unknown API routes return JSON 404, never the Express HTML page', async () => {
   const { kb, server, port } = await startServer();
   try {
