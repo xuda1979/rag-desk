@@ -1995,6 +1995,43 @@ test('client submit guards: blank/whitespace questions never fire a request, dem
   }
 });
 
+test('admin.js renders the wire-locked admin fields: stats arithmetic, logs "-" fallbacks, chunk detail meta, empty/error states', async () => {
+  const { kb, server, port } = await startServer();
+  // The wire payload shapes are locked (/api/admin/stats, /api/admin/logs,
+  // docs detail chunks), but admin.js is the only consumer of those fields:
+  // the stats card arithmetic, the "-" fallbacks for a null top_score and a
+  // missing domain, the chunk meta line and the empty/error states would
+  // silently stop rendering if rewired. Lock the render contracts.
+  try {
+    const res = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(res.status, 200);
+    // stats card: total/with_answer/命中率 computed client-side from the payload
+    assert.ok(res.body.includes("<div class=\"stat\"><b>${s.total}</b><span>总查询</span></div>"), 'stats card must render 总查询');
+    assert.ok(res.body.includes("<div class=\"stat\"><b>${s.with_answer}</b><span>有回答命中</span></div>"), 'stats card must render 有回答命中');
+    assert.ok(res.body.includes("<div class=\"stat\"><b>${hit}</b><span>命中率</span></div>"), 'stats card must render 命中率');
+    assert.ok(res.body.includes("s.total > 0 ? Math.round((s.with_answer / s.total) * 100) + '%' : '-'"), '命中率 must be total-guarded and fall back to "-"');
+    // logs rows: null top_score and missing domain render "-" (mirrors the
+    // wire lock on null top_score if the fix were reverted, the panel would show "undefined" or "NaN%")
+    assert.ok(res.body.includes("l.top_score == null ? '-' : (l.top_score * 100).toFixed(0) + '%'"), 'null top_score must render "-"');
+    assert.ok(res.body.includes("l.domain || '-'"), 'missing domain must render "-"');
+    assert.ok(res.body.includes('<tr><td colspan="6" class="dim">暂无查询记录</td></tr>'), 'empty logs must render the no-records state');
+    // docs rows: size is humanized to KB client-side
+    assert.ok(res.body.includes("(d.size / 1024).toFixed(1) + ' KB'"), 'doc size must render as KB client-side');
+    // chunk detail: header "#id · filename", per-chunk meta "chunk_idx · N 字", body escaped
+    assert.ok(res.body.includes("chunksDoc.textContent = filename ? `#${id} · ${filename}` : `#${id}`;"), 'chunk card header must render #id · filename');
+    assert.ok(res.body.includes('class="chunk-meta">#${c.chunk_idx} · ${c.body.length} 字</span>` + esc(c.body);'), 'chunk rows must render idx · length and escape the body');
+    assert.ok(res.body.includes('<div class="dim small">该文档暂无分块。</div>'), 'empty chunks must render the no-chunks state');
+    assert.ok(res.body.includes('chunksBody.innerHTML = \'<div class="dim small">加载失败：HTTP \' + res.status'), 'chunk load failure must surface the HTTP status');
+    // delete gating: the confirm prompt before DELETE, upload pending/reset states
+    assert.ok(res.body.includes('删除文档「${d.filename}」及其分块？'), 'doc delete must be confirm-gated');
+    assert.ok(res.body.includes("uploadResult.textContent = '上传中…';"), 'upload must show the pending state');
+    assert.ok(res.body.includes("fileInput.value = '';"), 'upload must reset the file input afterwards');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('static pages served', async () => {
   const { kb, server, port } = await startServer();
   const idx = await get(`http://localhost:${port}/`);
