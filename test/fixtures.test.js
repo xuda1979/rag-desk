@@ -194,6 +194,73 @@ test('make-pdf-fixture CLI entrypoint prints a skip decision and exits 0', async
   assert.ok(fs.existsSync(path.join(CORPUS, 'clinic-guide.pdf')), 'committed PDF must survive');
 });
 
+// Stub installed via --require before the make-pdf-fixture CLI runs, so the
+// CLI's require.main === module arm sees a pdfkit-present world. Mirrors
+// withPdfkitEnv: fake pdfkit (exported as a class, like the real module), a
+// node:fs proxy that steers createWriteStream to an inert stream so the
+// committed clinic-guide.pdf is never opened for writing. The real Droid TTF
+// passes the font probe; the fake end() flush resolves the pipeline to true.
+const PRELOAD_SRC = `'use strict';
+const Module = require('node:module');
+const fs = require('node:fs');
+const { EventEmitter } = require('node:events');
+
+const realResolve = Module._resolveFilename;
+const realLoad = Module._load;
+
+class FakePDFDocument {
+  constructor(opts) { this.renderOpts = opts; }
+  pipe(s) { this.stream = s; return s; }
+  fontSize() { return this; }
+  font() { return this; }
+  text() { return this; }
+  moveDown() { return this; }
+  end() { setImmediate(() => this.stream.emit('finish')); }
+}
+
+const inert = new (class extends EventEmitter {})();
+
+Module._resolveFilename = function (request, parent, isMain, options) {
+  if (typeof request === 'string' && request === 'pdfkit') return '/fake/pdfkit/index.js';
+  return realResolve.call(this, request, parent, isMain, options);
+};
+Module._load = function (request, parent, isMain) {
+  if (typeof request !== 'string') return realLoad.apply(this, arguments);
+  if (request === 'node:fs') {
+    return new Proxy(fs, {
+      get(t, prop) {
+        if (prop === 'createWriteStream') return () => inert;
+        if (typeof t[prop] === 'function') return t[prop].bind(t);
+        return t[prop];
+      },
+    });
+  }
+  if (request === 'pdfkit') return FakePDFDocument;
+  return realLoad.apply(this, arguments);
+};
+`;
+
+test('make-pdf-fixture CLI: with pdfkit + a CJK font prints "PDF fixture written" and exits 0', async () => {
+  // Covers the truthy arm of the CLI's decide log (scripts/make-pdf-fixture.js:125):
+  // "PDF fixture written" only prints when buildPdfFixture() resolves true, which
+  // needs pdfkit — a devDependency absent here — and the CLI arm only runs when
+  // the script is the main module. -r a preload that installs the same stubs as
+  // withPdfkitEnv inside the child: fake pdfkit, a node:fs proxy that keeps
+  // createWriteStream off the committed fixture, and the real Droid TTF passing
+  // the font probe so the generator takes the success path.
+  const preloadDir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'rd-pdfcli-'));
+  const preload = path.join(preloadDir, 'preload.js');
+  fs.writeFileSync(preload, PRELOAD_SRC);
+  try {
+    const { code, stdout, stderr } = await runCli(['--require', preload, 'scripts/make-pdf-fixture.js']);
+    assert.strictEqual(code, 0, `CLI should exit cleanly, stderr: ${stderr}`);
+    assert.match(stdout, /PDF fixture written/, 'CLI must report the written decision');
+    assert.ok(fs.existsSync(path.join(CORPUS, 'clinic-guide.pdf')), 'the committed PDF is untouched');
+  } finally {
+    fs.rmSync(preloadDir, { recursive: true, force: true });
+  }
+});
+
 test('make-pdf-fixture throws when pdfkit is absent and no committed PDF exists', async () => {
   // Covers the throw arm scripts/make-pdf-fixture.js:78: buildPdfFixture looks
   // up fs.existsSync on the shared 'node:fs' object at call time, so aliasing
