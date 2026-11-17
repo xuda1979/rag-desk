@@ -662,3 +662,68 @@ test('prod: a failed boot-time seed is non-fatal — server still boots healthy 
     probe.close();
   }
 });
+
+test('prod: server.js without RAGDESK_DB or PORT falls back to data/ragdesk.db and port 3000', async () => {
+  // The spawn-based boot tests always set RAGDESK_DB and PORT, so the falsy
+  // sides of `process.env.RAGDESK_DB || ...` and `process.env.PORT || 3000`
+  // (server.js lines 10-11) are never taken. Re-require the module with both
+  // env vars deleted, stubbing ./app, ./lib/knowledge and seed-fixtures so the
+  // module resolves the defaults without touching the dev DB or port 3000.
+  const realLoad = Module._load;
+  const saved = { PORT: process.env.PORT, RAGDESK_DB: process.env.RAGDESK_DB };
+  let observed = null; // { kbPath, opts, port }
+  try {
+    delete process.env.PORT;
+    delete process.env.RAGDESK_DB;
+    delete require.cache[require.resolve('../src/server')];
+    Module._load = function (request, parent, isMain) {
+      if (typeof request === 'string') {
+        if (request.endsWith('lib/knowledge')) {
+          return {
+            KnowledgeBase: class {
+              constructor(dbPath) {
+                observed = observed || {};
+                observed.kbPath = dbPath;
+              }
+              close() {}
+              storage = { getSetting: () => null, setSetting: () => {} };
+            },
+          };
+        }
+        if (request === './app') {
+          return {
+            buildApp: (kb, opts) => {
+              observed = observed || {};
+              observed.opts = opts;
+              return { listen: (port) => { observed.port = port; return { close: () => {} }; } };
+            },
+          };
+        }
+        if (request.endsWith('seed-fixtures')) {
+          // never settles: the boot IIFE hangs before logging or stamping
+          return { seedIfNeeded: () => new Promise(() => {}) };
+        }
+      }
+      return realLoad.apply(this, arguments);
+    };
+    require('../src/server');
+
+    assert.ok(observed, 'stubs must have been exercised');
+    assert.strictEqual(
+      observed.kbPath,
+      path.join(path.dirname(require.resolve('../src/server')), '..', 'data', 'ragdesk.db'),
+      'with RAGDESK_DB unset the DB defaults to <repo>/data/ragdesk.db'
+    );
+    assert.strictEqual(observed.port, 3000, 'with PORT unset the server binds the default 3000');
+    assert.deepStrictEqual(
+      observed.opts,
+      { adminToken: undefined, chatToken: undefined, allowOrigin: undefined },
+      'unset auth/origin envs pass through as undefined'
+    );
+  } finally {
+    Module._load = realLoad;
+    delete require.cache[require.resolve('../src/server')];
+    process.env.PORT = saved.PORT;
+    process.env.RAGDESK_DB = saved.RAGDESK_DB;
+  }
+});
