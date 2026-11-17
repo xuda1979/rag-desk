@@ -934,6 +934,26 @@ test('/api/chat honors a valid limit (citations capped by the requested count)',
   kb.close();
 });
 
+test('/api/chat clamps a huge limit to the 1000-citation ceiling', async () => {
+  const { kb, server, port } = await startServer();
+  // The same safeLimit() that gates /api/admin/logs also caps the chat side;
+  // a client looping on limit=1000000 would otherwise pull every FTS match and
+  // blow up the response. Exactly 1000 (not the 1005 offers, not the default
+  // 3) proves the ceiling fired end-to-end.
+  try {
+    for (let i = 0; i < 1005; i++) {
+      await kb.ingestBuffer(`d${i}.md`, Buffer.from(`咨询费收取第${i}号规则条目：统一按小时计费并开具发票。`));
+    }
+    const res = await post(`http://localhost:${port}/api/chat`, { query: '咨询费', limit: 1000000 });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.citations.length, 1000, 'huge chat limit must clamp to the 1000-citation ceiling');
+    assert.ok(res.body.citations.every((c) => c.docId != null));
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('/api/admin/logs tolerates a malformed limit (defaults instead of 500)', async () => {
   const { kb, server, port } = await startServer();
   const ok = await get(`http://localhost:${port}/api/admin/logs?limit=abc`);
