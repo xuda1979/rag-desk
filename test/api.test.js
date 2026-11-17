@@ -2283,6 +2283,41 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('admin.js binds its page elements by the ids admin.html ships — every handler and render target resolves at load', async () => {
+  const { kb, server, port } = await startServer();
+  // The demo-side counterpart locks the six demo bindings; the admin page has
+  // nine handles instead and they gate the whole panel: the stats grid, the
+  // docs/logs table bodies, the file input + upload button + result line, and
+  // the hidden chunk card (card, its header span, and the chunk list). A
+  // rewire that renames a getElementById target (or an admin.html id that
+  // drifts) silently detaches the corresponding handler or render, so pin the
+  // one-to-one binding against the ids admin.html actually ships.
+  try {
+    const admin = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(admin.status, 200);
+    const page = await get(`http://localhost:${port}/admin.html`);
+    assert.strictEqual(page.status, 200);
+    const bindings = [
+      ["const docsBody = document.getElementById('docs-body');", 'id="docs-body"'],
+      ["const logsBody = document.getElementById('logs-body');", 'id="logs-body"'],
+      ["const statsEl = document.getElementById('stats');", 'id="stats"'],
+      ["const fileInput = document.getElementById('file-input');", 'id="file-input"'],
+      ["const uploadBtn = document.getElementById('upload-btn');", 'id="upload-btn"'],
+      ["const uploadResult = document.getElementById('upload-result');", 'id="upload-result"'],
+      ["const chunksCard = document.getElementById('chunks-card');", 'id="chunks-card"'],
+      ["const chunksDoc = document.getElementById('chunks-doc');", 'id="chunks-doc"'],
+      ["const chunksBody = document.getElementById('chunks-body');", 'id="chunks-body"'],
+    ];
+    for (const [binding, pageId] of bindings) {
+      assert.ok(admin.body.includes(binding), `admin.js must bind ${pageId}`);
+      assert.ok(page.body.includes(pageId), `admin.html must ship ${pageId}`);
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js binds its page elements by the ids index.html ships — chat, ask-form, ask-input, domain-select, greeting and examples', async () => {
   const { kb, server, port } = await startServer();
   // Everything the demo does funnels through six element handles grabbed at
