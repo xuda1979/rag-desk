@@ -2417,6 +2417,41 @@ test('demo-side class hooks: the .msg/.bot-meta/.chat/.ask-bar/.examples/.demo-c
   }
 });
 
+test('page-chrome skin: the .demo-header h1/.subtitle/.badges/.badge/.badge-off header rules and the .admin-card/.grid/.upload-row/.logs-table admin rules style.css ships stay paired with the demo-page and admin-page skeletons that carry them', async () => {
+  // The three per-feature skins (.bot-cite demo chat, .stats/.docs-table/
+  // .chunk admin, rd-* widget) are locked; the shared page chrome is not. The
+  // header band — .demo-header h1, .subtitle, .badges/.badge/.badge-off — and
+  // the admin card layout — .admin-card, .grid, .upload-row, .logs-table —
+  // style both served pages, yet only the .badge-on state and a few heading
+  // texts are pinned. A rewire that restyles the chrome by id (or drops a
+  // rule) would silently orphan the classes the skeleton markup carries, so
+  // lock the CSS rules together with the demo-page/index.html and admin-page
+  // carriers they select on.
+  const { kb, server, port } = await startServer();
+  try {
+    const css = await get(`http://localhost:${port}/style.css`);
+    assert.strictEqual(css.status, 200);
+    for (const rule of ['.demo-header h1 {', '.subtitle {', '.badges {', '.badge {', '.badge-off {', '.admin-card {', '.admin-card h2 {', '.grid {', '.upload-row {', '.upload-row input[type=file] {', '.upload-row button, .docs-table button {', '.logs-table td {', '.dim {', '.small {']) {
+      assert.ok(css.body.includes(rule), `style.css must keep the page-chrome rule "${rule}"`);
+    }
+
+    const idx = await get(`http://localhost:${port}/`);
+    assert.strictEqual(idx.status, 200);
+    assert.ok(idx.body.includes('<body class="demo-page">'), 'demo page must carry the demo-page body class');
+    assert.ok(idx.body.includes('<header class="demo-header">'), 'demo page must carry the demo-header hook the title rules select on');
+    assert.ok(idx.body.includes('<div class="badges">'), 'demo page must carry the badges container the .badge rules style');
+
+    const admin = await get(`http://localhost:${port}/admin`);
+    assert.strictEqual(admin.status, 200);
+    assert.ok(admin.body.includes('<body class="admin-page">'), 'admin page must carry the admin-page body class');
+    assert.ok(admin.body.includes('<section class="grid">'), 'admin page must stack its cards in the .grid container');
+    assert.ok(admin.body.includes('<div class="upload-row">'), 'admin page must keep the .upload-row file-and-button row');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js domain-change flow re-renders greeting and chips, keeps the selection across auto-sync, caps excerpt at 160 and gates confidence on a top hit', async () => {
   const { kb, server, port } = await startServer();
   // The demo page's domain <select> and example chips are driven by demo.js:
