@@ -1001,3 +1001,87 @@ test('prod: README.md documents the exact API, env, limits, response shape and e
   assert.ok(readme.includes('widget.js'), 'README must document widget.js');
   assert.ok(readme.includes('ragdesk-data'), 'README must document the persistent named volume');
 });
+
+test('prod: browser clients (admin.js / demo.js) read exactly the JSON keys the backend actually produces', () => {
+  // The admin and demo pages are the third consumer of the API surface, and
+  // nothing greps their source: a storage.js rename of `with_answer` /
+  // `top_filename` / `chunk_count`, a knowledge.js change of the answer shape,
+  // or an app.js upload result without `action`/`filename` would silently break
+  // both pages while the node tests stay green. Every JSON member the two
+  // clients read must be constructible by the backend layer that serves it.
+  const adminJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.js'), 'utf8');
+  const demoSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'demo.js'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+
+  // ---- admin.js renders /api/admin/stats via data.stats.{total,with_answer}
+  assert.match(appSrc, /res\.json\(\{ stats: kb\.getQueryStats\(\) \}\)/, 'app.js must serve /api/admin/stats as { stats }');
+  assert.match(storageSrc, /SELECT COUNT\(\*\) AS total/, 'storage.js stats must count total queries');
+  assert.match(storageSrc, /AS with_answer/, 'storage.js stats must report with_answer');
+  assert.match(storageSrc, /matched > 0/, 'with_answer must be queries that hit at least one citation');
+  assert.ok(adminJs.includes('data.stats || { total: 0, with_answer: 0 }'), 'admin.js must read stats.total and stats.with_answer');
+  assert.ok(adminJs.includes('s.total'), 'admin.js must render total query count');
+  assert.ok(adminJs.includes('s.with_answer'), 'admin.js must render hit count');
+
+  // ---- admin.js /api/admin/docs rows need id, filename, kind, chunk_count, size, created_at
+  assert.match(storageSrc, /AS chunk_count\n       FROM docs d ORDER BY d\.id DESC/, 'docs list must count chunks per doc');
+  assert.ok(adminJs.includes("d.chunk_count"), 'admin.js must read chunk_count');
+  assert.ok(adminJs.includes("d.filename"), 'admin.js must read filename');
+  assert.ok(adminJs.includes("d.kind"), 'admin.js must read kind');
+  assert.ok(adminJs.includes("d.created_at"), 'admin.js must read created_at');
+  assert.ok(adminJs.includes('d.size'), 'admin.js must read size');
+  assert.ok(adminJs.includes('d.id'), 'admin.js must read the doc id');
+
+  // ---- admin.js /api/admin/docs/:id chunks read chunk_idx and body
+  assert.match(storageSrc, /SELECT id, chunk_idx, body FROM chunks/, 'chunk listing must expose chunk_idx and body');
+  assert.ok(adminJs.includes('c.chunk_idx'), 'admin.js must read chunk_idx');
+  assert.ok(adminJs.includes('c.body'), 'admin.js must read chunk body');
+
+  // ---- admin.js /api/admin/logs rows read created_at, query, domain, matched, top_score, top_filename
+  assert.match(storageSrc, /d\.filename AS top_filename/, 'logs must join in the top-hit filename');
+  assert.ok(adminJs.includes("l.created_at"), 'admin.js must read log created_at');
+  assert.ok(adminJs.includes("l.query"), 'admin.js must read log query');
+  assert.ok(adminJs.includes('l.domain'), 'admin.js must read log domain');
+  assert.ok(adminJs.includes('l.matched'), 'admin.js must read log matched');
+  assert.ok(adminJs.includes('l.top_score'), 'admin.js must read log top_score');
+  assert.ok(adminJs.includes('l.top_filename'), 'admin.js must read log top_filename');
+
+  // ---- admin.js /api/admin/upload results use action + filename (indexed/duplicate/error)
+  assert.ok(adminJs.includes("r.action === 'indexed'"), 'admin.js must handle the indexed action');
+  assert.ok(adminJs.includes("r.action === 'duplicate'"), 'admin.js must handle the duplicate action');
+  assert.ok(adminJs.includes("r.action === 'error'"), 'admin.js must handle the error action');
+  assert.ok(adminJs.includes('r.filename'), 'admin.js must read the per-file result filename');
+  assert.match(kbSrc, /return \{ action: 'indexed', docId, chunks: chunks\.length \}/, 'knowledge.js must emit indexed with chunks');
+  assert.match(kbSrc, /return \{ action: 'duplicate', docId: existing\.id \}/, 'knowledge.js must emit duplicate');
+  assert.match(kbSrc, /return \{ action: 'error'/, 'knowledge.js must emit error');
+  // the upload form accepts exactly the extensions knowledge.js can parse
+  const accepted = /accept="([^"]+)"/.exec(fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.html'), 'utf8'))[1];
+  for (const ext of ['.md', '.markdown', '.pdf', '.docx', '.txt', '.csv']) {
+    assert.ok(accepted.includes(ext), `admin upload input must accept .${ext}`);
+  }
+  const { fileKind } = require('../src/lib/extractors');
+  for (const ext of accepted.split(',').map((s) => s.trim()).filter(Boolean)) {
+    assert.ok(fileKind('sample' + ext) !== null, `admin page lets users pick ${ext} but the backend cannot parse it`);
+  }
+
+  // ---- demo.js /api/domains presets → same preset ids the backend serves
+  assert.match(appSrc, /res\.json\(\{\n\s+domains: domainIds\(\)\.map/, '/api/domains must map over the served preset ids');
+  assert.ok(demoSrc.includes('map[d.id] = { greeting: d.greeting, examples: d.examples || [] };'), 'demo must read id/greeting/examples per domain');
+  assert.ok(demoSrc.includes("fetch('/api/domains')"), 'demo must load presets from /api/domains');
+  // demo's static fallback must cover every preset id the backend defines
+  const { DOMAINS } = require('../src/lib/domains');
+  for (const id of Object.keys(DOMAINS)) {
+    assert.ok(demoSrc.includes(`${id}: {`), `demo.js static fallback must cover preset "${id}"`);
+    assert.ok(fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8').includes(`value="${id}"`), `index.html must ship the ${id} select option`);
+  }
+
+  // ---- demo.js renders /api/chat via answer/citations/document/paragraph/confidence/mode
+  assert.ok(demoSrc.includes('data.answer'), 'demo must render the answer text');
+  assert.ok(demoSrc.includes('(data.citations || [])'), 'demo must render citations');
+  assert.ok(demoSrc.includes('c.document'), 'demo must render citation document');
+  assert.ok(demoSrc.includes('c.paragraph'), 'demo must render citation paragraph');
+  assert.ok(demoSrc.includes('data.confidence'), 'demo must render confidence');
+  assert.ok(demoSrc.includes("data.mode === 'offline-retrieval'"), 'demo must branch on the offline mode tag');
+  assert.ok(demoSrc.includes("JSON.stringify({ query: q, domain: domainSelect.value })"), 'demo must submit query + domain to /api/chat');
+});
