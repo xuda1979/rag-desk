@@ -1044,6 +1044,68 @@ test('admin upload endpoint rejects more than 20 files with a 400', async () => 
   kb.close();
 });
 
+test('admin upload reads only the exact "files" multipart field — a wrong field name 400s and indexes nothing', async () => {
+  const { kb, server, port } = await startServer();
+  // upload.array('files', 20) (src/app.js) is the only wire identity for the
+  // file part: every prior multipart test posts name="files" — the same literal
+  // the route compares against — so a rename of the field would stay green
+  // while admin.js (which appends "files", public/admin.js) and the server
+  // silently disagree. multer aborts on the FIRST unexpected field
+  // (LIMIT_UNEXPECTED_FILE), which the central handler maps to a stable 400
+  // even when the payload is a single perfectly valid document; no bytes may
+  // be indexed.
+  const postOne = (fieldName) => {
+    const boundary = '----rd-field';
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${fieldName}"; filename="ok.md"\r\nContent-Type: text/markdown\r\n\r\n`),
+      Buffer.from('律师咨询费按小时计费，多退少补并开具发票。'),
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: 'localhost',
+          port,
+          path: '/api/admin/upload',
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length },
+        },
+        (r) => {
+          let out = '';
+          r.on('data', (c) => (out += c));
+          r.on('end', () => resolve({ status: r.statusCode, body: JSON.parse(out || '{}') }));
+        }
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+  };
+  try {
+    // discriminating wrong names: singular "file" (the natural mistake an
+    // integrator would make) and "documents" (a plausible alternative). Each
+    // must hit the exact unexpected-field 400 with zero persistence.
+    for (const name of ['file', 'documents']) {
+      const res = await postOne(name);
+      assert.strictEqual(res.status, 400, `field ${JSON.stringify(name)} must 400 on the unexpected-field branch`);
+      assert.deepStrictEqual(
+        res.body,
+        { error: 'too many files (max 20 per upload)' },
+        `field ${JSON.stringify(name)} maps to the exact multer message`
+      );
+      assert.deepStrictEqual(await kb.getAllDocs(), [], `field ${JSON.stringify(name)} must not index anything`);
+    }
+    // the exact field name still ingests, proving the 400s were about the key
+    const ok = await postOne('files');
+    assert.strictEqual(ok.status, 200, 'the exact "files" field still ingests');
+    assert.strictEqual(ok.body.results[0].action, 'indexed');
+    assert.deepStrictEqual((await kb.getAllDocs()).map((d) => d.filename), ['ok.md']);
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin upload endpoint rejects a file over the 50MB multer cap with the 413 JSON branch', async () => {
   const { kb, server, port } = await startServer();
   const boundary = '----rd-oversize';
