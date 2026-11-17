@@ -2283,6 +2283,32 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('admin.js loadLogs: each log row is a fresh <tr> composing six escaped/fallback columns — created_at, query, domain, matched, top_score and top_filename — before append', async () => {
+  const { kb, server, port } = await startServer();
+  // The wire shapes of the log columns are locked at the API level and the
+  // "-" fallbacks (top_score/domain) plus the empty state are pinned in the
+  // render test, but the row composition itself is not: query and created_at
+  // are user-authored strings, so a rewire that renders them raw would XSS the
+  // admin panel, `l.matched || 0` covers a missing count with "0" instead of
+  // "undefined", and `l.top_filename || '-'` keeps the last column from
+  // printing null. Each row must also be its own fresh <tr> appended to the
+  // logs body — a shared-node reuse would corrupt every render after the first.
+  try {
+    const res = await get(`http://localhost:${port}/admin.js`);
+    assert.strictEqual(res.status, 200);
+    assert.ok(res.body.includes("for (const l of rows) {"), 'loadLogs must iterate the log rows');
+    assert.ok(res.body.includes("const tr = document.createElement('tr');"), 'each log row must get its own fresh <tr>');
+    assert.ok(res.body.includes('`<td>${esc(l.created_at || \'\')}</td><td>${esc(l.query)}</td>` +'), 'created_at and query must be escaped into their cells');
+    assert.ok(res.body.includes('<td>${l.domain || \'-\'}</td><td>${l.matched || 0}</td>` +'), 'domain must fall back to "-" and matched to 0');
+    assert.ok(res.body.includes("l.top_score == null ? '-' : (l.top_score * 100).toFixed(0) + '%'"), 'null top_score must render "-" not "0%"');
+    assert.ok(res.body.includes("`<td>${esc(l.top_filename || '-')}</td>`;"), 'top_filename must be escaped with a "-" fallback');
+    assert.ok(res.body.includes('logsBody.appendChild(tr);'), 'each built row must be appended to the logs body');
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('admin.js viewChunks: the reveal chain — loading placeholder, card un-hide, #id · filename header, body clear and per-chunk .chunk element build — stays contiguous', async () => {
   const { kb, server, port } = await startServer();
   // The chunk-detail pins cover the header line, the chunk-meta composition,
