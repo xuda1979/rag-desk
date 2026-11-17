@@ -2283,6 +2283,38 @@ test('widget.js panel chrome: the message area, input bar and send button are cr
   }
 });
 
+test('demo.js binds its page elements by the ids index.html ships — chat, ask-form, ask-input, domain-select, greeting and examples', async () => {
+  const { kb, server, port } = await startServer();
+  // Everything the demo does funnels through six element handles grabbed at
+  // load time. A rewire that renames a getElementById target (or an index.html
+  // id that drifts) silently detaches that handle: the chat would no longer
+  // receive bubbles, the form submit would stop, the select/greeting/examples
+  // would ignore domain changes. The submit-flow and option/chip tests lock
+  // the HANDLES' later use but not the ids they resolve from, so pin the
+  // one-to-one binding against the ids index.html actually ships.
+  try {
+    const demo = await get(`http://localhost:${port}/demo.js`);
+    assert.strictEqual(demo.status, 200);
+    const page = await get(`http://localhost:${port}/index.html`);
+    assert.strictEqual(page.status, 200);
+    const bindings = [
+      ["const chatEl = document.getElementById('chat');", 'id="chat"'],
+      ["const form = document.getElementById('ask-form');", 'id="ask-form"'],
+      ["const input = document.getElementById('ask-input');", 'id="ask-input"'],
+      ["const domainSelect = document.getElementById('domain-select');", 'id="domain-select"'],
+      ["const greetingEl = document.getElementById('greeting');", 'id="greeting"'],
+      ["const examplesEl = document.getElementById('examples');", 'id="examples"'],
+    ];
+    for (const [binding, pageId] of bindings) {
+      assert.ok(demo.body.includes(binding), `demo.js must bind ${pageId}`);
+      assert.ok(page.body.includes(pageId), `index.html must ship ${pageId}`);
+    }
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('demo.js submit flow: press send and the question is echoed escaped, the input clears, the pending bubble is replaced by the render, and the panel scrolls; admin.js builds chunk rows via createElement + className', async () => {
   const { kb, server, port } = await startServer();
   // The submit event is the single entry point of the demo's asking loop: a
