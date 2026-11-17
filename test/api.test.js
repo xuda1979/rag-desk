@@ -1899,6 +1899,44 @@ test('widget script wiring: defaults, domain passthrough and chat body shape', a
   }
 });
 
+test('widget.js caps citations at two for the compact panel and surfaces network failures as 请求失败:reason', async () => {
+  const { kb, server, port } = await startServer();
+  try {
+    const res = await get(`http://localhost:${port}/widget.js`);
+    assert.strictEqual(res.status, 200);
+    // the embeddable panel is 340px wide, so the citation list is capped at two
+    // lines — a rewire that renders the whole pool would bloat the bubble and
+    // wreck the compact layout the widget is embedded for.
+    assert.match(
+      res.body,
+      /var cites = \(data\.citations \|\| \[\]\)\.slice\(0, 2\)/,
+      'widget must cap the rendered citation pool at two'
+    );
+    // each capped citation still renders 来源：document §paragraph under the answer
+    assert.match(
+      res.body,
+      /'<span class="rd-cite">来源：' \+ esc\(c\.document\) \+ ' §' \+ c\.paragraph \+ '<\/span>'/,
+      'citation lines must render 来源：document §paragraph'
+    );
+    // only the capped lines are joined into the bubble (a spread of all
+    // citations here would show — the wire honors limit but the panel must not)
+    assert.match(
+      res.body,
+      /\(data\.citations \|\| \[\]\)\.slice\(0, 2\)[\s\S]*?\.join\(''\);/,
+      'the capped citation list must be joined into the bubble text'
+    );
+    // network/parse failures fall back to a readable 请求失败 message carrying the
+    // escaped reason — never an unescaped raw error or a silent empty bubble.
+    assert.ok(
+      res.body.includes("addMsg('bot', '请求失败：' + esc(err.message));"),
+      'network failures must surface as 请求失败:reason, not silent blank'
+    );
+  } finally {
+    server.close();
+    kb.close();
+  }
+});
+
 test('static pages served', async () => {
   const { kb, server, port } = await startServer();
   const idx = await get(`http://localhost:${port}/`);
