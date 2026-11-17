@@ -8,6 +8,7 @@ const os = require('node:os');
 const http = require('node:http');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
+const Module = require('node:module');
 
 const { KnowledgeBase } = require('../src/lib/knowledge');
 const { buildApp } = require('../src/app');
@@ -484,5 +485,78 @@ test('prod: server.js creates the DB parent directory at boot (RAGDESK_DB into a
   } finally {
     if (child.exitCode === null) child.kill('SIGTERM');
     await exited;
+  }
+});
+
+test('prod: a failed boot-time seed is non-fatal — server still boots healthy and retries next launch', async () => {
+  // server.js cold-starts the corpus seed in an async IIFE and catches the
+  // rejection at lines 32-33 ("[seed] failed:") instead of aborting the boot.
+  // Force that path in-process: stub seed-fixtures to throw, then require
+  // src/server.js with a temp DB and a free port so the module binds without
+  // touching data/ragdesk.db or a real port.
+  const bootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rd-seedfail-'));
+  const dbPath = path.join(bootDir, 'fail.db');
+  const freePort = () =>
+    new Promise((resolve, reject) => {
+      const probe = net.createServer();
+      probe.on('error', reject);
+      probe.listen(0, () => {
+        const p = probe.address().port;
+        probe.close(() => resolve(p));
+      });
+    });
+  const port = await freePort();
+
+  const realLoad = Module._load;
+  const save = { PORT: process.env.PORT, RAGDESK_DB: process.env.RAGDESK_DB };
+  let app, server, kb;
+  let errOut = '';
+  const origErr = console.error;
+  console.error = (...args) => (errOut += args.map(String).join(' ') + '\n');
+  try {
+    process.env.PORT = String(port);
+    process.env.RAGDESK_DB = dbPath;
+    Module._load = function (request, parent, isMain) {
+      // Module._load hands the specifier exactly as the caller wrote it
+      // ("../scripts/seed-fixtures"), not a resolved absolute path.
+      if (typeof request === 'string' && request.endsWith('seed-fixtures')) {
+        return {
+          seedIfNeeded: async () => {
+            throw new Error('boom: fixtures dir is unwritable');
+          },
+        };
+      }
+      return realLoad.apply(this, arguments);
+    };
+    ({ app, server, kb } = require('../src/server'));
+
+    // the seed IIFE ran at require-time; poll until the failure was logged
+    for (let i = 0; i < 50 && !errOut.includes('[seed] failed:'); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(errOut.includes('[seed] failed:'), 'the seed rejection must be logged, not swallowed');
+    assert.ok(errOut.includes('boom: fixtures dir is unwritable'), 'the underlying cause must surface');
+
+    const health = await fetch(`http://127.0.0.1:${port}/api/health`);
+    assert.strictEqual(health.status, 200);
+    const body = await health.json();
+    assert.strictEqual(body.ok, true, 'the server must boot and serve despite the seed failure');
+    assert.strictEqual(body.mode, 'offline');
+  } finally {
+    console.error = origErr;
+    Module._load = realLoad;
+    process.env.PORT = save.PORT;
+    process.env.RAGDESK_DB = save.RAGDESK_DB;
+    if (kb) kb.close();
+    if (server) await new Promise((r) => server.close(r));
+  }
+
+  // the failed seed must not stamp the 'seeded' sentinel, so the next launch
+  // retries the corpus instead of assuming it is present
+  const probe = new KnowledgeBase(dbPath);
+  try {
+    assert.strictEqual(probe.getSetting('seeded'), null, 'failed seed leaves no completion marker');
+  } finally {
+    probe.close();
   }
 });
