@@ -790,3 +790,104 @@ test('prod: server.js exits 0 promptly on SIGTERM and SIGINT (graceful Docker st
   }
   fs.rmSync(bootDir, { recursive: true, force: true });
 });
+
+test('prod: docker-compose.yml env wiring matches the keys src/server.js actually reads', () => {
+  // Deploying via `docker compose up` is the documented path (README lines 36-42).
+  // server.js reads exactly five env keys: PORT, RAGDESK_DB, RAGDESK_ADMIN_TOKEN,
+  // RAGDESK_CHAT_TOKEN, RAGDESK_ALLOW_ORIGIN (lines 10-11 and 18-22). If a key
+  // name drifts here the container boots against defaults while the compose file
+  // silently points at a dead key, so assert the file text against the source.
+  const compose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml'), 'utf8');
+  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+
+  // every env key the compose file sets or documents must be read by server.js
+  const composeEnvKeys = [...compose.matchAll(/RAGDESK_[A-Z_]+/g)].map((m) => m[0]);
+  assert.ok(composeEnvKeys.length >= 4, 'compose should wire the four RAGDESK_* keys');
+  for (const key of composeEnvKeys) {
+    assert.ok(
+      serverSrc.includes(`process.env.${key}`),
+      `compose references ${key} but src/server.js never reads it`
+    );
+  }
+  // and vice versa: server.js must not read a key the compose file neither sets
+  // nor documents (active or commented) — such a key would be invisible in prod
+  const serverKeys = [...serverSrc.matchAll(/process\.env\.([A-Z_]+)/g)].map((m) => m[1]);
+  const composeText = [compose, 'PORT'].join('\n');
+  for (const key of serverKeys) {
+    assert.ok(composeText.includes(key), `src/server.js reads ${key} but compose never wires it`);
+  }
+
+  // RAGDESK_DB points into the named volume /app/data; server.js mkdirs the
+  // missing parent at boot (locked separately), so the path just has to land
+  // in WORKDIR while the volume persists it across restarts.
+  assert.match(compose, /RAGDESK_DB=\/app\/data\/ragdesk\.db/, 'DB must live on the persistent volume');
+  assert.match(compose, /- ragdesk-data:\/app\/data/, 'DB dir must be the named volume mount');
+  assert.ok(/^volumes:\s*\n\s*ragdesk-data:/m.test(compose), 'ragdesk-data volume must be declared');
+
+  // healthcheck contract: /api/health, exit 0 on ok, exit 1 otherwise, and the
+  // probe URL must use the same port the service publishes (3000).
+  assert.match(compose, /\/api\/health/, 'healthcheck must hit the health endpoint');
+  assert.match(compose, /r\.ok\?0:1/, 'healthcheck must exit 0 iff the probe is ok');
+  assert.match(compose, /127\.0\.0\.1:3000\/api\/health/, 'healthcheck must probe the published port');
+
+  // the admin token is wired with the documented change-me placeholder so the
+  // gate is on by default instead of the open-fallback server.js uses when unset
+  assert.match(compose, /RAGDESK_ADMIN_TOKEN=change-me/, 'admin gate must default on in prod wiring');
+});
+
+test('prod: Dockerfile runtime stage installs prod deps only, matches the start command, and keeps HEALTHCHECK current', () => {
+  // The runtime stage runs `npm ci --omit=dev`, so every require() reachable at
+  // boot must be a prod dependency; pdfkit (dev-only, build-stage fixture tool)
+  // must stay out. The CMD must stay byte-identical to `npm start`, and the
+  // HEALTHCHECK env-key (PORT) must match what server.js reads.
+  const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const prodDeps = Object.keys(pkg.dependencies);
+  const devDeps = Object.keys(pkg.devDependencies);
+
+  // runtime stage = the second FROM; prod-only install
+  assert.match(dockerfile, /RUN npm ci --omit=dev --no-audit --no-fund/, 'runtime image must install prod deps only');
+  assert.ok(dockerfile.indexOf('npm ci --omit=dev') > dockerfile.indexOf('FROM node:22-bookworm-slim AS runtime'), 'omit=dev must belong to the runtime stage');
+  // the build stage keeps full deps so pdfkit is available for fixture regeneration
+  assert.match(dockerfile, /RUN npm ci --no-audit --no-fund/, 'build stage must install full deps for fixture generation');
+  assert.ok(dockerfile.indexOf('npm ci --no-audit --no-fund') < dockerfile.indexOf('FROM node:22-bookworm-slim AS runtime'), 'full install must belong to the build stage');
+
+  // every prod package.json dependency is genuinely used by src/ at runtime
+  const srcEntries = fs.readdirSync(path.join(__dirname, '..', 'src'), { recursive: true })
+    .filter((p) => p.endsWith('.js'))
+    .map((p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8'));
+  const srcText = srcEntries.join('\n');
+  for (const dep of prodDeps) {
+    assert.match(srcText, new RegExp(`require\\(['"]${dep}['"]\\)|require\\(['"][^'"]*${dep}[^'"]*['"]\\)`), `src/ must require prod dep ${dep}`);
+  }
+  // the inverse: no module src/ requires at runtime may be dev-only
+  const requiredBySrc = [...srcText.matchAll(/require\(['"](?:[^'"\]/]*\/)*([^'"/]+)['"]\)/g)].map((m) => m[1]);
+  for (const mod of requiredBySrc) {
+    if (devDeps.includes(mod)) {
+      assert.fail(`src/ requires ${mod} but it is a devDependency — the runtime image would crash`);
+    }
+  }
+  // pdfkit specifically is the build-time fixture tool, build stage only
+  assert.ok(devDeps.includes('pdfkit'), 'pdfkit must remain a devDependency');
+
+  // CMD must equal `npm start`
+  const start = pkg.scripts.start;
+  const cmd = /CMD \[([^\]]+)\]/.exec(dockerfile)[1].split(',').map((s) => s.trim().match(/^"(.+)"$/)[1]);
+  assert.strictEqual(cmd.join(' '), start, 'the container CMD must match the npm start script');
+
+  // HEALTHCHECK probes /api/health on process.env.PORT||3000 (same read as server.js line 11)
+  assert.match(dockerfile, /HEALTHCHECK[^\n]*\n\s*CMD node -e/, 'runtime image must declare a HEALTHCHECK');
+  assert.match(dockerfile, /\/api\/health/, 'HEALTHCHECK must probe the health endpoint');
+  assert.match(dockerfile, /process\.env\.PORT\|\|3000/, 'HEALTHCHECK port read must mirror server.js');
+  assert.match(dockerfile, /r\.ok\?0:1/, 'HEALTHCHECK must exit 0 iff the probe is ok');
+});
+
+test('prod: .dockerignore keeps dev/test/build artifacts out of the image context', () => {
+  // The runtime stage copies src, public, scripts, fixtures and README only.
+  // Anything committed but excluded here (test/, examples/, data/, .git) must
+  // never leak into the image context or the `npm ci --omit=dev` layer.
+  const ignore = fs.readFileSync(path.join(__dirname, '..', '.dockerignore'), 'utf8');
+  for (const entry of ['node_modules', 'data', '.git', 'test', 'examples', '.future-code']) {
+    assert.ok(ignore.split(/\r?\n/).includes(entry), `.dockerignore must exclude ${entry}`);
+  }
+});
