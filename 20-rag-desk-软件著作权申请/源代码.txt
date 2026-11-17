@@ -14,17 +14,17 @@
   5. 本程序共 25 页。
 
 二、源程序总体行数
-  8 个源文件共 1211 行（含注释），去除注释与空行后的有效代码行数为 934 行，
+  8 个源文件共 1230 行（含注释），去除注释与空行后的有效代码行数为 942 行，
   该行数与《软件著作权登记表》所填「源程序总行数」口径一致。
 
 三、程序文件组成
   01. src/lib/chunker.js           共   78 行 / 有效  48 行
-  02. src/lib/tokenizer.js         共  112 行 / 有效  69 行
-  03. src/lib/storage.js           共  239 行 / 有效 202 行
-  04. src/lib/extractors.js        共  125 行 / 有效 109 行
+  02. src/lib/tokenizer.js         共  113 行 / 有效  70 行
+  03. src/lib/storage.js           共  248 行 / 有效 211 行
+  04. src/lib/extractors.js        共  120 行 / 有效 106 行
   05. src/lib/domains.js           共   84 行 / 有效  69 行
-  06. src/lib/knowledge.js         共  330 行 / 有效 255 行
-  07. src/app.js                   共  185 行 / 有效 137 行
+  06. src/lib/knowledge.js         共  323 行 / 有效 251 行
+  07. src/app.js                   共  206 行 / 有效 142 行
   08. src/server.js                共   58 行 / 有效  45 行
 
 四、正文
@@ -119,7 +119,6 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
 }
 
 module.exports = { chunkText };
-
 // ~~~~~~~~ 文件：src/lib/tokenizer.js ~~~~~~~~
 'use strict';
 
@@ -141,13 +140,13 @@ const DELIM_RE = /[\s\p{P}\p{S}\p{C}]+/u;
 
 /** Normalize text for FTS: lowercase latin, trim, collapse whitespace. */
 function normalize(text) {
+  return String(text == null ? '' : text).toLowerCase().replace(/\s+/g, ' ').trim();
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 002 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
-  return String(text == null ? '' : text).toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -186,6 +185,7 @@ function tokenize(text) {
 /** Tokenize a CJK run into overlapping n-grams (default bigrams). */
 function ngrams(cjkRun, n = 2) {
   const out = [];
+  if (!cjkRun) return out;
   if (cjkRun.length < n) {
     out.push(cjkRun);
     return out;
@@ -244,7 +244,6 @@ module.exports = {
   stripPageMarkers,
   CJK_RE,
 };
-
 // ~~~~~~~~ 文件：src/lib/storage.js ~~~~~~~~
 'use strict';
 
@@ -253,13 +252,13 @@ const { toQuery, expandForIndex } = require('./tokenizer');
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS docs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 004 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
   filename   TEXT NOT NULL,
   kind       TEXT NOT NULL,
   mime       TEXT,
@@ -309,13 +308,13 @@ class Storage {
     this.db.exec('PRAGMA foreign_keys=ON;');
     this.db.exec(SCHEMA);
   }
+
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 005 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
-
   stmt(sql) {
     return this.db.prepare(sql);
   }
@@ -365,13 +364,13 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
     const insFts = this.stmt('INSERT INTO fts (rowid, tokens, orig) VALUES (?,?,?)');
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      for (const c of chunks) {
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 006 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
-      for (const c of chunks) {
         const r = insChunk.run(docId, c.index, c.text);
         const id = Number(r.lastInsertRowid);
         insFts.run(id, expandForIndex(c.text).join(' '), c.text);
@@ -421,13 +420,13 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
          FROM fts WHERE fts MATCH ?
          ORDER BY score ASC
          LIMIT ?`
+      ).all(q, limit);
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 007 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
-      ).all(q, limit);
       const getChunk = this.stmt(
         `SELECT c.chunk_idx, c.doc_id, d.filename, d.kind
          FROM chunks c JOIN docs d ON d.id = c.doc_id WHERE c.id = ?`
@@ -459,7 +458,16 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
          FROM chunks WHERE body LIKE ? COLLATE NOCASE
          LIMIT ?`
       ).all(like, limit);
-      return { chunks: rows, docScores: new Map() };
+      const chunks = rows.map((r) => ({
+        chunkId: r.chunk_id,
+        chunkIndex: r.chunk_idx,
+        body: r.body,
+        docId: r.doc_id,
+        filename: r.filename,
+        kind: r.kind,
+        score: r.score, // 0.0 on the degrade path
+      }));
+      return { chunks, docScores: new Map() };
     }
   }
 
@@ -469,14 +477,6 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
       `INSERT INTO queries_log (query, domain, matched, top_score, top_doc_id, source)
        VALUES (?,?,?,?,?,?)`
     ).run(query, domain || null, matched || 0, topScore ?? null, topDocId ?? null, source || 'api');
-  }
-
-  listQueryLogs(limit = 100) {
-    return this.stmt(
-      `SELECT q.*, d.filename AS top_filename
-       FROM queries_log q LEFT JOIN docs d ON d.id = q.top_doc_id
-       ORDER BY q.id DESC LIMIT ?`
-    ).all(limit);
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 008 页 / 共 025 页
 
@@ -485,10 +485,18 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
   }
 
+  listQueryLogs(limit = 100) {
+    return this.stmt(
+      `SELECT q.*, d.filename AS top_filename
+       FROM queries_log q LEFT JOIN docs d ON d.id = q.top_doc_id
+       ORDER BY q.id DESC LIMIT ?`
+    ).all(limit);
+  }
+
   queryLogStats() {
     return this.stmt(
       `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN matched > 0 THEN 1 ELSE 0 END) AS with_answer
+              COALESCE(SUM(CASE WHEN matched > 0 THEN 1 ELSE 0 END), 0) AS with_answer
        FROM queries_log`
     ).get();
   }
@@ -514,7 +522,6 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
 }
 
 module.exports = { Storage };
-
 // ~~~~~~~~ 文件：src/lib/extractors.js ~~~~~~~~
 'use strict';
 
@@ -523,9 +530,15 @@ const path = require('node:path');
 
 /** Parse CSV (RFC-4180-ish, handles embedded quotes/newlines) into rows. */
 function parseCsv(text) {
-  const src = String(text == null ? '' : text);
+  let src = String(text == null ? '' : text);
   if (src.charCodeAt(0) === 0xfeff) src = src.slice(1);
   const rows = [];
+────────────────────────────────────────────────────────────────────────────────────────────────
+                          第 009 页 / 共 025 页
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+RAG-Desk 垂直行业知识库问答系统 V1.0
+────────────────────────────────────────────────────────────────────────────────────────────────
   let field = '';
   let row = [];
   let inQuotes = false;
@@ -533,12 +546,6 @@ function parseCsv(text) {
     row.push(field);
     field = '';
   };
-────────────────────────────────────────────────────────────────────────────────────────────────
-                          第 009 页 / 共 025 页
-
-────────────────────────────────────────────────────────────────────────────────────────────────
-RAG-Desk 垂直行业知识库问答系统 V1.0
-────────────────────────────────────────────────────────────────────────────────────────────────
   const commitRow = () => {
     commitField();
     rows.push(row);
@@ -582,6 +589,12 @@ function extractDocx(buffer) {
   const parts = [];
   const tagRe = /<w:p[ >]/g;
   // split into paragraphs then pull out <w:t> run texts
+────────────────────────────────────────────────────────────────────────────────────────────────
+                          第 010 页 / 共 025 页
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+RAG-Desk 垂直行业知识库问答系统 V1.0
+────────────────────────────────────────────────────────────────────────────────────────────────
   doc.split(/<\/w:p>/).forEach((para) => {
     const texts = [];
     const re = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g;
@@ -589,12 +602,6 @@ function extractDocx(buffer) {
     while ((m = re.exec(para)) !== null) texts.push(m[1]);
     if (texts.length) parts.push(texts.join('').trim());
   });
-────────────────────────────────────────────────────────────────────────────────────────────────
-                          第 010 页 / 共 025 页
-
-────────────────────────────────────────────────────────────────────────────────────────────────
-RAG-Desk 垂直行业知识库问答系统 V1.0
-────────────────────────────────────────────────────────────────────────────────────────────────
   return parts.join('\n');
 }
 
@@ -638,6 +645,12 @@ function fileKind(filename) {
     case '.docx':
       return 'docx';
     case '.csv':
+────────────────────────────────────────────────────────────────────────────────────────────────
+                          第 011 页 / 共 025 页
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+RAG-Desk 垂直行业知识库问答系统 V1.0
+────────────────────────────────────────────────────────────────────────────────────────────────
       return 'csv';
     case '.txt':
       return 'text';
@@ -645,20 +658,8 @@ function fileKind(filename) {
       return null;
   }
 }
-────────────────────────────────────────────────────────────────────────────────────────────────
-                          第 011 页 / 共 025 页
 
-────────────────────────────────────────────────────────────────────────────────────────────────
-RAG-Desk 垂直行业知识库问答系统 V1.0
-────────────────────────────────────────────────────────────────────────────────────────────────
-
-/** True when the file shows a supported extension. */
-function isSupportedFile(filename) {
-  return fileKind(filename) !== null;
-}
-
-module.exports = { parseCsv, extractDocx, extractPdf, textFromBuffer, fileKind, isSupportedFile };
-
+module.exports = { parseCsv, extractDocx, extractPdf, textFromBuffer, fileKind };
 // ~~~~~~~~ 文件：src/lib/domains.js ~~~~~~~~
 'use strict';
 
@@ -700,13 +701,13 @@ const DOMAINS = {
     exampleQuestions: [
       '挂号需要带什么？',
       '儿童接种疫苗时间？',
-      '可以刷医保卡吗？',
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 012 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
+      '可以刷医保卡吗？',
     ],
   },
 
@@ -749,7 +750,6 @@ function domainIds() {
 }
 
 module.exports = { DOMAINS, getDomain, domainIds };
-
 // ~~~~~~~~ 文件：src/lib/knowledge.js ~~~~~~~~
 'use strict';
 
@@ -778,11 +778,9 @@ const {
 class KnowledgeBase {
   /**
    * @param {string} dbPath
-   * @param {{markdownLib?:object}} [opts]
    */
-  constructor(dbPath, opts = {}) {
+  constructor(dbPath) {
     this.storage = new Storage(dbPath);
-    this.markdownLib = opts.markdownLib || null; // optional plugin, e.g. marked
   }
 
   close() {
@@ -813,14 +811,14 @@ class KnowledgeBase {
 
   isSupportedFile(filename) {
     return fileKind(filename) !== null;
+  }
+
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 014 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
-  }
-
   // ---------------- ingestion ----------------
   /**
    * Ingest a single document from a buffer.
@@ -869,14 +867,14 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
    * Re-index a directory of files (ignores unsupported).
    * @returns {Promise<Array<object>>}
    */
+  async ingestDir(dirPath) {
+    const out = [];
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 015 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
-  async ingestDir(dirPath) {
-    const out = [];
     const entries = fs
       .readdirSync(dirPath, { withFileTypes: true })
       .filter((e) => e.isFile());
@@ -925,14 +923,14 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
     const body = String(chunkBody || '').replace(/\s+/g, ' ').trim();
     if (!body) return '';
     const { ngrams, CJK_RE, normalize } = require('./tokenizer');
+    // candidate anchor terms: whole query, then each CJK bigram
+    const anchors = [];
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 016 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
-    // candidate anchor terms: whole query, then each CJK bigram
-    const anchors = [];
     const q = normalize(query);
     if (q) anchors.push(q);
     for (const run of q.split(/[^\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/).filter(Boolean)) {
@@ -981,14 +979,14 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
       domain: domainCfg.id,
       confidence: top ? confidenceScore(top, chunks) : 0,
       citations:
+        top ? chunks.map((c) => ({
+          docId: c.docId,
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 017 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
-        top ? chunks.map((c) => ({
-          docId: c.docId,
           document: c.filename,
           paragraph: c.chunkIndex,
           excerpt: this.excerptFrom(c.body, query),
@@ -1037,14 +1035,14 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
       mode: 'llm',
       llm: true,
       domain: domainCfg.id,
+      confidence: confidenceScore(top, chunks),
+      citations: chunks.map((c) => ({
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 018 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
-      confidence: confidenceScore(top, chunks),
-      citations: chunks.map((c) => ({
         docId: c.docId,
         document: c.filename,
         paragraph: c.chunkIndex,
@@ -1089,23 +1087,18 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
       storage: this.storage.dbPath,
     };
   }
-
-  /** Set (or replace) the active markdown renderer plugin. */
-  setMarkdownLib(lib) {
-    this.markdownLib = lib;
-────────────────────────────────────────────────────────────────────────────────────────────────
-                          第 019 页 / 共 025 页
-
-────────────────────────────────────────────────────────────────────────────────────────────────
-RAG-Desk 垂直行业知识库问答系统 V1.0
-────────────────────────────────────────────────────────────────────────────────────────────────
-  }
 }
 
 /** Simple confidence: hinge on the top score vs the score spread. */
 function confidenceScore(top, chunks) {
   if (chunks.length === 0) return 0;
   const s1 = Math.abs(top.score || 0);
+────────────────────────────────────────────────────────────────────────────────────────────────
+                          第 019 页 / 共 025 页
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+RAG-Desk 垂直行业知识库问答系统 V1.0
+────────────────────────────────────────────────────────────────────────────────────────────────
   if (chunks.length === 1) return Math.min(0.5 + s1, 1);
   const s2 = Math.abs(chunks[1].score || 0);
   const gap = s1 / (s1 + s2 || 1);
@@ -1122,7 +1115,6 @@ async function mockSummarizer({ query, context }) {
 }
 
 module.exports = { KnowledgeBase, mockSummarizer, confidenceScore };
-
 // ~~~~~~~~ 文件：src/app.js ~~~~~~~~
 'use strict';
 
@@ -1132,6 +1124,19 @@ const multer = require('multer');
 const { getDomain, domainIds } = require('./lib/domains');
 
 const ROOT = path.join(__dirname, '..');
+
+/**
+ * Coerce a user-supplied limit into a sane integer. Malformed values (e.g.
+ * "abc") would otherwise pass NaN into SQLite LIMIT ? and blow up with a
+ * "datatype mismatch" 500; negative/zero/huge values are clamped too.
+ * @param {*} v raw value from query/body
+ * @param {number} dflt fallback when v is not a positive finite number
+ * @returns {number}
+ */
+function safeLimit(v, dflt) {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 1000) : dflt;
+}
 
 /**
  * Build the express app backed by the given KnowledgeBase.
@@ -1144,26 +1149,27 @@ const ROOT = path.join(__dirname, '..');
  * }} [opts] optional security overrides (also read from env by
  *   server.js: RAGDESK_ADMIN_TOKEN / RAGDESK_CHAT_TOKEN / RAGDESK_ALLOW_ORIGIN).
  *   Leaving a token empty keeps the corresponding area open (dev default).
- */
-function buildApp(kb, opts = {}) {
-  const adminToken = opts.adminToken || process.env.RAGDESK_ADMIN_TOKEN || '';
-  const chatToken = opts.chatToken || process.env.RAGDESK_CHAT_TOKEN || '';
-  const allowOrigin = opts.allowOrigin || process.env.RAGDESK_ALLOW_ORIGIN || '';
 ────────────────────────────────────────────────────────────────────────────────────────────────
                           第 020 页 / 共 025 页
 
 ────────────────────────────────────────────────────────────────────────────────────────────────
 RAG-Desk 垂直行业知识库问答系统 V1.0
 ────────────────────────────────────────────────────────────────────────────────────────────────
+ */
+function buildApp(kb, opts = {}) {
+  const adminToken = opts.adminToken || process.env.RAGDESK_ADMIN_TOKEN || '';
+  const chatToken = opts.chatToken || process.env.RAGDESK_CHAT_TOKEN || '';
+  const allowOrigin = opts.allowOrigin || process.env.RAGDESK_ALLOW_ORIGIN || '';
 
   const app = express();
-  app.use(express.json({ limit: '2mb' }));
-  app.use(express.urlencoded({ extended: false }));
 
   // CORS for the embeddable widget: when RAGDESK_ALLOW_ORIGIN is set it is
   // reflected; otherwise a permissive default lets customer pages call the
   // chat API cross-origin (chat is the public-facing surface; admin stays
-  // same-origin and additionally token-gated when configured).
+  // same-origin and additionally token-gated when configured). Runs BEFORE the
+  // body parsers so a rejected request still carries the headers: an oversized
+  // JSON body errors in express.json and otherwise skips this middleware,
+  // leaving the browser to mask the readable 413 as a CORS network failure.
   app.use((req, res, next) => {
     const origin = req.get('origin');
     if (!origin) return next();
@@ -1173,6 +1179,9 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
     if (req.method === 'OPTIONS') return res.status(204).end();
     next();
   });
+
+  app.use(express.json({ limit: '2mb' }));
+  app.use(express.urlencoded({ extended: false }));
 
   // ---------------------------------------------------------------- auth
   // Admin endpoints are only protected when RAGDESK_ADMIN_TOKEN is set
@@ -1196,6 +1205,12 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
     }
     next();
   };
+────────────────────────────────────────────────────────────────────────────────────────────────
+                          第 021 页 / 共 025 页
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+RAG-Desk 垂直行业知识库问答系统 V1.0
+────────────────────────────────────────────────────────────────────────────────────────────────
 
   app.get('/api/health', (_req, res) => {
     res.json({
@@ -1205,12 +1220,6 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
       mode: 'offline',
       llmEnabled: false,
     });
-────────────────────────────────────────────────────────────────────────────────────────────────
-                          第 021 页 / 共 025 页
-
-────────────────────────────────────────────────────────────────────────────────────────────────
-RAG-Desk 垂直行业知识库问答系统 V1.0
-────────────────────────────────────────────────────────────────────────────────────────────────
   });
 
   // ---------------------------------------------------------------- chat api
@@ -1219,12 +1228,12 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
     if (!query || !String(query).trim()) {
       return res.status(400).json({ error: 'query is required' });
     }
-    const result = kb.answer(String(query).trim(), { domain, limit });
+    const result = kb.answer(String(query).trim(), { domain, limit: safeLimit(limit, 3) });
     kb.logQuery({
       query: result.query,
       domain: result.domain,
       matched: result.citations.length,
-      topScore: result.confidence,
+      topScore: result.top ? result.confidence : null,
       topDocId: result.top ? result.top.docId : null,
       source: 'api',
     });
@@ -1252,6 +1261,12 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
 
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
   app.post('/api/admin/upload', upload.array('files', 20), async (req, res) => {
+────────────────────────────────────────────────────────────────────────────────────────────────
+                          第 022 页 / 共 025 页
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+RAG-Desk 垂直行业知识库问答系统 V1.0
+────────────────────────────────────────────────────────────────────────────────────────────────
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ error: 'no files' });
     const results = [];
@@ -1261,17 +1276,11 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
         ...(await kb.ingestBuffer(f.originalname, f.buffer, { mime: f.mimetype })),
       });
     }
-────────────────────────────────────────────────────────────────────────────────────────────────
-                          第 022 页 / 共 025 页
-
-────────────────────────────────────────────────────────────────────────────────────────────────
-RAG-Desk 垂直行业知识库问答系统 V1.0
-────────────────────────────────────────────────────────────────────────────────────────────────
     res.json({ results });
   });
 
   app.get('/api/admin/logs', (req, res) => {
-    const limit = Number(req.query.limit || 100);
+    const limit = safeLimit(req.query.limit, 100);
     res.json({ logs: kb.getQueryLogs(limit), stats: kb.getQueryStats() });
   });
 
@@ -1290,6 +1299,10 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
     });
   });
 
+  // Unknown API paths get a JSON 404 so client-side JSON.parse never hits the
+  // Express HTML error page.
+  app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
+
   // ---------------------------------------------------------------- pages
   app.use(express.static(path.join(ROOT, 'public')));
   app.get('/admin', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'admin.html')));
@@ -1304,6 +1317,12 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     const status =
+────────────────────────────────────────────────────────────────────────────────────────────────
+                          第 023 页 / 共 025 页
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+RAG-Desk 垂直行业知识库问答系统 V1.0
+────────────────────────────────────────────────────────────────────────────────────────────────
       err && err.status ? err.status :
       err && err.code === 'LIMIT_FILE_SIZE' ? 413 :
       err && err.code === 'LIMIT_UNEXPECTED_FILE' ? 400 :
@@ -1317,12 +1336,6 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
             ? 'request body too large'
             : err && err.message
               ? err.message
-────────────────────────────────────────────────────────────────────────────────────────────────
-                          第 023 页 / 共 025 页
-
-────────────────────────────────────────────────────────────────────────────────────────────────
-RAG-Desk 垂直行业知识库问答系统 V1.0
-────────────────────────────────────────────────────────────────────────────────────────────────
               : 'internal server error';
     if (status >= 500) console.error('[api]', err);
     res.status(status).json({ error: message });
@@ -1332,7 +1345,6 @@ RAG-Desk 垂直行业知识库问答系统 V1.0
 }
 
 module.exports = { buildApp };
-
 // ~~~~~~~~ 文件：src/server.js ~~~~~~~~
 'use strict';
 
@@ -1361,6 +1373,12 @@ const app = buildApp(kb, {
 (async () => {
   if (!kb.storage.getSetting('seeded')) {
     try {
+────────────────────────────────────────────────────────────────────────────────────────────────
+                          第 024 页 / 共 025 页
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+RAG-Desk 垂直行业知识库问答系统 V1.0
+────────────────────────────────────────────────────────────────────────────────────────────────
       const res = await seedIfNeeded(kb, { force: false });
       kb.storage.setSetting('seeded', '1');
       console.log(`[seed] ${res.added} docs indexed, ${res.skipped} already present`);
@@ -1373,12 +1391,6 @@ const app = buildApp(kb, {
 })();
 
 const server = app.listen(PORT, () => {
-────────────────────────────────────────────────────────────────────────────────────────────────
-                          第 024 页 / 共 025 页
-
-────────────────────────────────────────────────────────────────────────────────────────────────
-RAG-Desk 垂直行业知识库问答系统 V1.0
-────────────────────────────────────────────────────────────────────────────────────────────────
   console.log(`RAG-Desk running at http://localhost:${PORT}`);
   console.log(`  Admin:  http://localhost:${PORT}/admin`);
   console.log(`  Demo:   http://localhost:${PORT}/`);
@@ -1397,18 +1409,6 @@ process.on('SIGINT', close);
 process.on('SIGTERM', close);
 
 module.exports = { app, server, kb };
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

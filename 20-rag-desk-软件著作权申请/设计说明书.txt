@@ -209,7 +209,7 @@
   入参：text, opts{window=400, overlap=40}；出参：chunk 数组。
   主要函数：chunkText(text, opts)。
 
-3.2  模块 02：tokenizer（src/lib/tokenizer.js，有效 69 行）
+3.2  模块 02：tokenizer（src/lib/tokenizer.js，有效 70 行）
 --------------------------------------------------------------------------------
   功能：中文友好分词与 FTS5 查询/索引互转。
   关键常量和函数：
@@ -226,7 +226,7 @@
   例：查询“律师咨询费怎么收取” → （"律师" OR "师咨" OR "咨询" OR "询费"
     OR "费怎" OR "怎么" OR "么收" OR "收取"）。
 
-3.3  模块 03：storage（src/lib/storage.js，有效 202 行）
+3.3  模块 03：storage（src/lib/storage.js，有效 211 行）
 --------------------------------------------------------------------------------
   功能：以 node:sqlite（DatabaseSync）封装全部持久化操作，隔离 SQL。
   初始化：PRAGMA journal_mode=WAL；PRAGMA foreign_keys=ON；执行 SCHEMA。
@@ -239,7 +239,7 @@
   关键点：FTS 虚表在 JOIN + MATCH 下无法安全别名，故先查 fts 取 rowid 与
     原文，再二次联查 chunks/docs 补元数据。
 
-3.4  模块 04：extractors（src/lib/extractors.js，有效 109 行）
+3.4  模块 04：extractors（src/lib/extractors.js，有效 106 行）
 --------------------------------------------------------------------------------
   功能：把各格式二进制转为纯文本。
     parseCsv(text)   ：RFC-4180 风格解析（支持引号内逗号/换行/CRLF）。
@@ -257,7 +257,7 @@
   exampleQuestions。answer() 用 lead/fallback/footer 组装离线回答；可选 LLM
   路径将 systemPrompt 注入 summarizer。getDomain(id) 未命中回退 general。
 
-3.6  模块 06：knowledge（src/lib/knowledge.js，有效 255 行）
+3.6  模块 06：knowledge（src/lib/knowledge.js，有效 251 行）
 --------------------------------------------------------------------------------
   功能：系统核心门面，组合存储、分块、分词、领域模板完成业务。
     ingestBuffer(filename, buffer, meta)：
@@ -275,7 +275,7 @@
   离线回答格式：
     answer = lead + “\n\n” + excerpt + “\n\n” + footer。
 
-3.7  模块 07：app（src/app.js，有效 137 行）
+3.7  模块 07：app（src/app.js，有效 142 行）
 --------------------------------------------------------------------------------
   功能：Express 应用工厂 buildApp(kb, opts)，便于测试注入独立实例。
   中间件与路由：

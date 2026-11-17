@@ -1296,3 +1296,135 @@ test('prod: committed corpus fixtures stay byte-identical to their generating so
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// 软件著作权申请 submission docs (源代码.txt / 软件著作权登记表.txt / 设计说明书.txt)
+// ---------------------------------------------------------------------------
+// The three submitted documents carry line counts of the source. They are
+// regenerated deterministically from the current src/ files by
+// scripts/gen-submission-docs.js, so a source change that moves any count is a
+// hard failure here: the committed submission artifacts must never drift from
+// the product they describe.
+
+const gen = require('../scripts/gen-submission-docs');
+const SUBDIR = path.join(__dirname, '..', '20-rag-desk-软件著作权申请');
+
+test('prod: submission docs byte-match fresh generation from the current source', () => {
+  const committedSrc = fs.readFileSync(path.join(SUBDIR, '源代码.txt'), 'utf8');
+  const committedReg = fs.readFileSync(path.join(SUBDIR, '软件著作权登记表.txt'), 'utf8');
+  const committedDsg = fs.readFileSync(path.join(SUBDIR, '设计说明书.txt'), 'utf8');
+
+  const c = gen.computeCounts();
+  // Counts are pinned: any change to src/ that moves a line count breaks the
+  // submission docs and must be followed by a regeneration commit.
+  assert.strictEqual(c.grand, 1230, 'grand total lines must stay pinned');
+  assert.strictEqual(c.grandEff, 942, 'grand effective lines must stay pinned');
+  assert.strictEqual(c.pages, 25, 'page count must stay pinned');
+  const expected = [
+    ['src/lib/chunker.js', 78, 48],
+    ['src/lib/tokenizer.js', 113, 70],
+    ['src/lib/storage.js', 248, 211],
+    ['src/lib/extractors.js', 120, 106],
+    ['src/lib/domains.js', 84, 69],
+    ['src/lib/knowledge.js', 323, 251],
+    ['src/app.js', 206, 142],
+    ['src/server.js', 58, 45],
+  ];
+  assert.strictEqual(c.rows.length, expected.length, 'one row per tracked source file');
+  c.rows.forEach((r, i) => {
+    assert.strictEqual(r.rel, expected[i][0], 'row order must track FILES');
+    assert.strictEqual(r.total, expected[i][1], `${r.rel} total lines must stay pinned`);
+    assert.strictEqual(r.effective, expected[i][2], `${r.rel} effective lines must stay pinned`);
+  });
+
+  // 源代码.txt is fully rebuilt from the source stream: committed bytes must
+  // equal fresh generation, and generation must be a fixed point.
+  const freshSrc = gen.buildSourceCodeDoc(c);
+  assert.strictEqual(freshSrc, committedSrc, 'committed 源代码.txt must byte-match regeneration');
+  assert.strictEqual(gen.buildSourceCodeDoc(gen.computeCounts()), freshSrc, 'generation must be idempotent');
+
+  // Structure: exactly 25 footers, 8 file markers in FILES order, and the
+  // summary lines carrying the pinned totals.
+  const srcLines = committedSrc.split('\n');
+  const footers = srcLines.filter((l) => /^\s*第 \d{3} 页 \/ 共 025 页$/.test(l));
+  assert.strictEqual(footers.length, 25, 'exactly one footer per page');
+  const markers = srcLines.filter((l) => /^\/\/ ~~~~~~~~ 文件：.+ ~~~~~~~~$/.test(l));
+  assert.deepStrictEqual(markers, c.rows.map((r) => `// ~~~~~~~~ 文件：${r.rel} ~~~~~~~~`), 'markers must track FILES order');
+  assert.ok(srcLines.some((l) => l.includes(' 5. 本程序共 25 页。')), 'header must carry the page total');
+  assert.ok(
+    srcLines.some((l) => l.includes('8 个源文件共 1230 行（含注释），去除注释与空行后的有效代码行数为 942 行')),
+    'header must carry the pinned grand totals'
+  );
+  assert.strictEqual(srcLines[srcLines.length - 2], '（源代码全文完）', 'doc must end with the closing marker');
+
+  // 登记表 / 设计说明书 are surgical patches of the committed prose: the
+  // patched output must equal the committed bytes exactly.
+  assert.strictEqual(
+    gen.patchRegister(c, committedReg),
+    committedReg,
+    'committed 软件著作权登记表.txt must byte-match regeneration'
+  );
+  assert.strictEqual(
+    gen.patchDesign(c, committedDsg),
+    committedDsg,
+    'committed 设计说明书.txt must byte-match regeneration'
+  );
+});
+
+test('prod: submission-doc generator guards fail loudly on drift', () => {
+  const c = gen.computeCounts();
+
+  // srcBodyPages pads to pages*50 body lines; if a page budget is too small the
+  // stream cannot fit and the generator must refuse instead of emitting garbage.
+  assert.throws(() => gen.srcBodyPages({ ...c, pages: c.pages - 1 }), /stream longer than/);
+
+  // patchDesign must touch one heading per module; a doc missing any heading
+  // (or a rel renamed in src) must fail rather than silently skip the count.
+  const partial = '3.1  模块 01：chunker（src/lib/chunker.js，有效 48 行）\n';
+  assert.throws(() => gen.patchDesign(c, partial), /expected 8 module headings, patched 1/);
+
+  // A heading-looking line for a rel outside FILES hits the skip (continue)
+  // branch: with all 8 real headings present the patch still succeeds, the
+  // real headings get their current effective counts, and the unknown line is
+  // left byte-untouched rather than patched or counted.
+  const headings = c.rows.map((r) => `模块 ${String(r.idx).padStart(2, '0')}（${r.rel}，有效 1 行）`).join('\n');
+  const ghost = '模块 99（src/lib/ghost.js，有效 12 行）';
+  const mixed = gen.patchDesign(c, `${headings}\n${ghost}`);
+  for (const r of c.rows) {
+    const patchedHeading = `模块 ${String(r.idx).padStart(2, '0')}（${r.rel}，有效 ${r.effective} 行）`;
+    assert.ok(mixed.includes(patchedHeading), `row ${r.idx} must be rewritten to its current effective count`);
+  }
+  assert.strictEqual(mixed.split('\n').at(-1), ghost, 'an unknown rel must be left untouched, not patched');
+});
+
+test('prod: gen-submission-docs CLI regenerates the docs in place and exits 0', async () => {
+  // Covers the require.main === module / run() arm: the CLI rewrites the three
+  // committed docs from the current source. Generation is a fixed point (see
+  // the byte-match test above), so this run cannot change git-tracked bytes.
+  const { code, stdout, stderr } = await new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'scripts/gen-submission-docs.js'], {
+      cwd: path.join(__dirname, '..'),
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d) => (out += d));
+    child.stderr.on('data', (d) => (err += d));
+    child.on('close', (exitCode) => resolve({ code: exitCode, stdout: out, stderr: err }));
+  });
+  assert.strictEqual(code, 0, `CLI should exit cleanly, stderr: ${stderr}`);
+  assert.match(stdout, /submission docs regenerated \(1230 lines \/ 942 effective, 25 pages\)/);
+
+  // The in-place rewrite must leave the committed docs byte-identical.
+  const c = gen.computeCounts();
+  assert.strictEqual(
+    fs.readFileSync(path.join(SUBDIR, '源代码.txt'), 'utf8'),
+    gen.buildSourceCodeDoc(c),
+    'CLI run must not mutate committed 源代码.txt'
+  );
+  const reg = fs.readFileSync(path.join(SUBDIR, '软件著作权登记表.txt'), 'utf8');
+  const dsg = fs.readFileSync(path.join(SUBDIR, '设计说明书.txt'), 'utf8');
+  assert.strictEqual(gen.patchRegister(c, reg), reg, 'CLI run must not mutate the committed 登记表');
+  assert.strictEqual(gen.patchDesign(c, dsg), dsg, 'CLI run must not mutate the committed 设计说明书');
+});
