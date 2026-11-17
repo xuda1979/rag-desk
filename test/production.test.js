@@ -891,3 +891,37 @@ test('prod: .dockerignore keeps dev/test/build artifacts out of the image contex
     assert.ok(ignore.split(/\r?\n/).includes(entry), `.dockerignore must exclude ${entry}`);
   }
 });
+
+test('prod: examples/embeddable.html embed contract matches widget.js and a real backend domain', () => {
+  // The committed example embed (README section for 嵌入浮窗) drives widget.js
+  // purely through data-* attributes. widget.js reads exactly five of them
+  // (api.test.js pins those getAttribute calls), and data-domain names a preset
+  // the backend serves via /api/domains. If the example uses an attribute the
+  // widget never reads, or a domain id that no longer exists, the demo silently
+  // degrades while tests stay green — so assert the file against its two peers.
+  const example = fs.readFileSync(path.join(__dirname, '..', 'examples', 'embeddable.html'), 'utf8');
+  const widgetSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'widget.js'), 'utf8');
+
+  // the widget must be embedded from the URL the app actually serves
+  assert.match(example, /src="http:\/\/localhost:3000\/widget\.js"/, 'example must load widget.js from the served URL');
+
+  const widgetReads = [...widgetSrc.matchAll(/script\.getAttribute\('(data-[a-z-]+)'\)/g)].map((m) => m[1]);
+  assert.ok(widgetReads.length >= 5, `widget.js should read 5 data attributes, got ${widgetReads.length}`);
+
+  // every data-* on the example's two widget script tags must be one the
+  // widget actually reads (data-token is documented/optional/sample text)
+  const exampleAttrs = [...example.matchAll(/data-([a-z-]+)=/g)].map((m) => `data-${m[1]}`);
+  assert.ok(exampleAttrs.length >= 5, `example should wire 5 data attributes, got ${exampleAttrs.length}`);
+  for (const attr of exampleAttrs) {
+    assert.ok(widgetReads.includes(attr), `example uses ${attr} but widget.js never reads it`);
+  }
+
+  // chat traffic must target the API route buildApp serves
+  assert.match(example, /data-api="http:\/\/localhost:3000\/api\/chat"/, 'example must point data-api at /api/chat');
+
+  // data-domain must be a preset the backend actually serves (/api/domains)
+  const { DOMAINS } = require('../src/lib/domains');
+  for (const attr of example.matchAll(/data-domain="([a-z-]+)"/g)) {
+    assert.ok(DOMAINS[attr[1]], `example references domain "${attr[1]}" but no such preset is served`);
+  }
+});
