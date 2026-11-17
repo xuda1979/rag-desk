@@ -5,6 +5,7 @@ const assert = require('node:assert');
 
 const fs = require('node:fs');
 const path = require('node:path');
+const Module = require('node:module');
 
 const { parseCsv, textFromBuffer, fileKind, extractPdf, extractDocx } = require('../src/lib/extractors');
 
@@ -101,6 +102,29 @@ test('extractPdf rejects corrupt, truncated and empty input with a clear message
   await assert.rejects(() => extractPdf(Buffer.from('not a pdf at all')), /Invalid PDF structure/);
   await assert.rejects(() => extractPdf(Buffer.from('%PDF-1.4\n123')), /Invalid PDF structure/);
   await assert.rejects(() => extractPdf(Buffer.alloc(0)), /zero bytes/);
+});
+
+test('extractPdf joins an array-shaped getText result (pdf-parse output normalization)', async () => {
+  // pdf-parse 2.4.5 getText() returns { pages, text, total }, so the
+  // `Array.isArray(out) ? out.join('') : out.text || ''` array arm is only
+  // reachable under a stubbed parser. Intercept extractPdf's lazy require
+  // (same Module._load pattern as the server.js seed-failure boot test).
+  const realLoad = Module._load;
+  let calls = 0;
+  Module._load = function (request, parent, isMain) {
+    if (typeof request === 'string' && request === 'pdf-parse') {
+      calls++;
+      return { PDFParse: class { async getText() { return ['页一', '页二']; } } };
+    }
+    return realLoad.apply(this, arguments);
+  };
+  try {
+    const text = await extractPdf(Buffer.from('anything'));
+    assert.strictEqual(text, '页一页二', 'array pages concatenate into one stream');
+    assert.strictEqual(calls, 1, 'extractPdf pulls pdf-parse lazily per call');
+  } finally {
+    Module._load = realLoad;
+  }
 });
 
 test('extractDocx fails loudly on corrupt or docx-less input', () => {
