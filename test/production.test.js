@@ -926,6 +926,49 @@ test('prod: examples/embeddable.html embed contract matches widget.js and a real
   }
 });
 
+test("prod: README 嵌入浮窗 snippet's data-* vocabulary matches widget.js reads and a served domain preset", () => {
+  // README.md section 嵌入浮窗 is the operator-facing embed recipe: a user
+  // copies that script tag into their own site. Every data-* attribute it
+  // documents must be one widget.js actually reads, data-api must point at the
+  // /api/chat route buildApp serves, and data-domain must name a preset the
+  // backend exposes — otherwise a copied snippet silently degrades.
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const widgetSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'widget.js'), 'utf8');
+
+  // scope to the 嵌入浮窗 section so the feature-list line (line ~13) that also
+  // mentions <script data-api= data-domain=> cannot pollute the vocabulary check
+  const section = readme.match(/## 嵌入浮窗[\s\S]*?## 测试/);
+  assert.ok(section, 'README.md must have a 嵌入浮窗 section');
+  const snippet = section[0].match(/<script[\s\S]*?<\/script>/);
+  assert.ok(snippet, 'the 嵌入浮窗 section must contain the widget embed script tag');
+  const block = snippet[0];
+
+  // the snippet must document exactly the five attributes widget.js reads
+  const snippetAttrs = [...block.matchAll(/data-([a-z-]+)=/g)].map((m) => `data-${m[1]}`);
+  const expected = ['data-api', 'data-domain', 'data-greeting', 'data-title', 'data-token'];
+  assert.deepEqual([...snippetAttrs].sort(), [...expected].sort(),
+    `README snippet must document exactly ${expected.join('/')}`);
+  const widgetReads = [...widgetSrc.matchAll(/script\.getAttribute\('(data-[a-z-]+)'\)/g)].map((m) => m[1]);
+  for (const attr of snippetAttrs) {
+    assert.ok(widgetReads.includes(attr), `README snippet documents ${attr} but widget.js never reads it`);
+  }
+
+  // data-api must target the /api/chat route buildApp serves
+  assert.match(block, /data-api="http:\/\/localhost:3000\/api\/chat"/, 'README snippet must point data-api at the served /api/chat route');
+
+  // data-domain must be a preset /api/domains actually serves
+  const { DOMAINS } = require('../src/lib/domains');
+  for (const attr of block.matchAll(/data-domain="([a-z-]+)"/g)) {
+    assert.ok(DOMAINS[attr[1]], `README snippet references domain "${attr[1]}" but no such preset is served`);
+  }
+
+  // the five attributes must have real effect in widget.js, not just be parsed
+  assert.match(widgetSrc, /headers\.Authorization = 'Bearer ' \+ TOKEN/, 'widget.js must send the documented data-token as a Bearer header');
+  assert.match(widgetSrc, /fab\.title = TITLE/, 'widget.js must render data-title as the button tooltip');
+  assert.match(widgetSrc, /addMsg\('bot', esc\(GREETING\)\)/, 'widget.js must greet with data-greeting upon open');
+  assert.match(readme, /data-token Bearer 令牌/, 'README 覆盖 list must advertise the data-token Bearer footprint');
+});
+
 test('prod: README.md documents the exact API, env, limits, response shape and embed surface the code serves', () => {
   // README.md is the operational contract fed into the software-copyright
   // submission: its route table, env table, upload limits and chat response
