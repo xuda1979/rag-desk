@@ -1737,6 +1737,11 @@ test('widget script is served and self-contained', async () => {
   const { kb, server, port } = await startServer();
   const res = await get(`http://localhost:${port}/widget.js`);
   assert.strictEqual(res.status, 200);
+  assert.strictEqual(
+    res.headers['content-type'],
+    'application/javascript; charset=UTF-8',
+    'widget.js is the cross-origin embeddable script — browsers strict-MIME-block a <script src> served as text/plain'
+  );
   assert.match(res.body, /ragdesk-fab/);
   server.close();
   kb.close();
