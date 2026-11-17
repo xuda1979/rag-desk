@@ -142,6 +142,48 @@ test('seed-fixtures CLI entrypoint runs the seed to completion (exit 0 with adde
   assert.match(stdout, /\[seed\] added=\d+ skipped=\d+/, 'main() must print the seeding tally');
 });
 
+test('seed-fixtures CLI failure: unopenable dev DB exits 1 and prints the cause (covers main().catch)', async (t) => {
+  // Covers the `main().catch` arm (scripts/seed-fixtures.js:65-68): when the
+  // dev DB cannot be opened, main() rejects and the CLI prints the error to
+  // stderr then exits 1. `data/` is gitignored, so briefly swapping the db
+  // file for a directory placeholder makes the real KnowledgeBase throw
+  // ERR_SQLITE_ERROR. Same-directory renames are atomic: open fds from any
+  // concurrent seed keep writing to the old inode, nothing else opens
+  // data/ragdesk.db (all other spawns set RAGDESK_DB), and the placeholder
+  // directory can never be re-opened as a DB file.
+  const devDb = path.join(ROOT, 'data', 'ragdesk.db');
+  if (!fs.existsSync(devDb)) {
+    t.skip('no dev DB on disk (data/ is gitignored)');
+    return;
+  }
+  const backup = devDb + '.rr-test.bak';
+  const placeholder = devDb + '.rr-test.dir';
+  const wasDir = fs.statSync(devDb).isDirectory(); // repair a crashed previous run
+  fs.mkdirSync(placeholder);
+  if (wasDir) {
+    fs.readdirSync(devDb).forEach((f) => fs.renameSync(path.join(devDb, f), path.join(placeholder, f)));
+    fs.rmdirSync(devDb);
+  } else {
+    fs.renameSync(devDb, backup);
+  }
+  fs.renameSync(placeholder, devDb);
+  try {
+    const { code, stdout, stderr } = await runCli(['scripts/seed-fixtures.js']);
+    assert.strictEqual(code, 1, 'the CLI must exit non-zero when the seed fails');
+    assert.match(stderr, /unable to open database file/, 'the caught error must be printed to stderr');
+  } finally {
+    fs.renameSync(devDb, placeholder);
+    if (wasDir) {
+      fs.readdirSync(placeholder).forEach((f) => fs.renameSync(path.join(placeholder, f), path.join(devDb, f)));
+      fs.rmdirSync(placeholder);
+    } else {
+      fs.renameSync(backup, devDb);
+      fs.rmdirSync(placeholder);
+    }
+    assert.ok(fs.statSync(devDb).isFile(), 'the dev DB file must be restored intact');
+  }
+});
+
 test('make-pdf-fixture CLI entrypoint prints a skip decision and exits 0', async () => {
   // Covers the pdfkit-absent CLI arm (scripts/make-pdf-fixture.js:124): with
   // the dev-only generator missing (this environment), buildPdfFixture returns
