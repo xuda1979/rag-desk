@@ -60,6 +60,15 @@ test('expandForIndex splits adjacent CJK/ascii runs at the boundary', () => {
   assert.deepStrictEqual(expandForIndex('法律咨询400'), ['法律', '律咨', '咨询', '400']);
 });
 
+test('expandForIndex coerces null/undefined input to an empty token stream (tokenize null guard)', () => {
+  // expandForIndex hands the raw argument to tokenize() — the only exported
+  // entry that reaches the `text == null ? '' : text` coercion directly.
+  assert.deepStrictEqual(expandForIndex(null), [], 'null input must produce no tokens, never throw');
+  assert.deepStrictEqual(expandForIndex(undefined), [], 'undefined input must produce no tokens, never throw');
+  assert.deepStrictEqual(expandForIndex(''), [], 'empty input produces no tokens');
+  assert.deepStrictEqual(expandForIndex('法律咨询'), ['法律', '律咨', '咨询'], 'valid input still segments normally');
+});
+
 test('toQuery: single Han character stays a bare quoted token, never erased', () => {
   assert.strictEqual(toQuery('月'), '"月"');
   assert.strictEqual(toQuery('疫苗 月'), '("疫苗") "月"');
