@@ -1915,6 +1915,12 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.match(serverSrc, /PORT \|\| 3000/, 'manual §2.2 default port 3000 must match server.js');
   assert.ok(manual.includes('npm run seed'), 'manual §2.2 must document npm run seed');
   assert.ok(manual.includes('npm start'), 'manual §2.2 must document npm start');
+  // the manual's 控制台会打印访问地址 promise: server.js logs the running
+  // banner with the actual PORT inside the app.listen callback, naming admin
+  // and demo URLs as the manual says
+  assert.ok(manual.includes('启动成功后控制台会打印访问地址，默认端口 3000'), 'manual §2.2 must promise the console boot banner');
+  assert.match(serverSrc, /app\.listen\(PORT, \(\) => \{\n\s*console\.log\(`RAG-Desk running at http:\/\/localhost:\$\{PORT\}`\)/, 'manual §2.2 boot banner must be printed in the listen callback');
+  assert.match(serverSrc, /Admin:  http:\/\/localhost:\$\{PORT\}\/admin/, 'manual §2.2 boot banner must log the admin URL');
   assert.ok(compose.includes('ragdesk-data:/app/data'), 'manual §2.3 named volume must exist in docker-compose');
   assert.ok(manual.includes('ragdesk-data'), 'manual §2.3 must document the named volume');
   assert.match(dockerfile, /\/api\/health/, 'manual §2.3 healthcheck must exist in Dockerfile');
