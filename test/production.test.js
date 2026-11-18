@@ -1516,6 +1516,15 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   const { DOMAINS } = require('../src/lib/domains');
   const { fileKind } = require('../src/lib/extractors');
 
+  // ---- 申请人/著作权人身份：4 份递交文件的权属字段必须一致为 许达
+  // （工作单位 中国移动研究院）。登记表展开为"工作单位："，其余三份用括号
+  // 附注；此处任意一处写错都直接影响著作权归属认定。
+  assert.ok(reg.includes('许达（工作单位：中国移动研究院）'), '登记表 著作权人 must expand the work unit 中国移动研究院');
+  const srcDoc = fs.readFileSync(path.join(SUBDIR, '源代码.txt'), 'utf8');
+  for (const doc of [srcDoc, dsg, manual]) {
+    assert.ok(doc.includes('许达（中国移动研究院）'), '源代码/设计说明书/用户手册 must carry 许达（中国移动研究院）');
+  }
+
   // ---- 四、主要功能
   // 1. intake formats (Markdown/纯文本/PDF/DOCX/CSV FAQ) must be the real fileKind set
   assert.match(reg, /Markdown、纯文本、PDF、DOCX、CSV/, '登记表 §四.1 must list the intake formats');
