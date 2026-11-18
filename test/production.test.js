@@ -1580,8 +1580,21 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.match(widgetSrc, /headers\.Authorization = 'Bearer ' \+ TOKEN/, 'widget.js must send the Bearer token as documented');
   assert.ok(manual.includes('RAGDESK_ALLOW_ORIGIN'), 'manual §3.5 must document RAGDESK_ALLOW_ORIGIN CORS control');
 
-  // ---- §3.6 curl example: the corpus file it uploads must exist on disk
+  // ---- §3.6 HTTP interface examples: each curl the manual shows must hit a
+  // route app.js actually serves, with the documented method, path and headers
+  assert.ok(manual.includes('curl http://localhost:3000/api/health'), 'manual §3.6 must show the health-check curl');
+  assert.match(appSrc, /app\.get\('\/api\/health'/, 'manual §3.6 health route must exist in app.js');
+  assert.ok(manual.includes('curl -X POST http://localhost:3000/api/chat'), 'manual §3.6 must show the chat POST curl');
+  assert.match(appSrc, /app\.post\('\/api\/chat'/, 'manual §3.6 chat route must exist in app.js');
+  assert.ok(manual.includes('"query":"律师咨询费怎么收取？","domain":"legal"'), 'manual §3.6 chat curl must use the served legal example');
+  assert.ok(manual.includes('Authorization: Bearer <token>'), 'manual §3.6 must document the chat Bearer header');
+  assert.ok(appSrc.includes('Bearer ${chatToken}'), 'manual §3.6 chat Bearer gate must exist in app.js');
   assert.ok(manual.includes('-F "files=@./fixtures/corpus/clinic-faq.md"'), 'manual §3.6 must show the real fixture upload curl');
+  assert.match(appSrc, /app\.post\('\/api\/admin\/upload'/, 'manual §3.6 upload route must exist in app.js');
+  assert.ok(manual.includes('"x-admin-token: <token>"'), 'manual §3.6 upload curl must send x-admin-token');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'fixtures', 'corpus', 'clinic-faq.md')), 'manual §3.6 upload curl must point at a real fixture file');
+  assert.ok(manual.includes('curl -X DELETE http://localhost:3000/api/admin/docs/1'), 'manual §3.6 must show the doc-delete curl');
+  assert.match(appSrc, /app\.delete\('\/api\/admin\/docs\/:id'/, 'manual §3.6 doc-delete route must exist in app.js');
 
   // ---- §4.1 env table: every variable documented is read, defaults match
   const envReads = [
