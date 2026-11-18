@@ -1988,8 +1988,14 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.ok(adminSrc.includes("'ragdesk-admin-token'"), 'admin.js must persist the token under the manual-documented key');
   assert.ok(adminSrc.includes("headers['x-admin-token']"), 'admin.js must send x-admin-token as the manual documents');
   // the doc list column the manual describes must be the one admin.html renders
+  assert.ok(manual.includes('文件名、类型、分块、大小、上传时间'), 'manual §3.2 doc-list parenthetical must match admin.html column order');
+  assert.match(adminHtml, /<th>文件名<\/th><th>类型<\/th><th>分块<\/th><th>大小<\/th><th>上传时间<\/th>/, 'manual §3.2 doc-list column order must match admin.html');
   assert.ok(manual.includes('上传时间'), 'manual §3.2 doc list must label the upload timestamp');
   assert.match(adminHtml, /上传时间/, 'manual §3.2 上传时间 column must exist in admin.html');
+  // clicking a doc shows all its indexed chunks, with an explicit empty state
+  assert.ok(manual.includes('点击文档可查看其全部索引分块内容'), 'manual §3.2 must promise the chunk preview');
+  assert.ok(adminSrc.includes('data-action="view"'), 'manual §3.2 chunk-preview button must exist in admin.js');
+  assert.ok(adminSrc.includes('该文档暂无分块。'), 'manual §3.2 empty chunk state must exist in admin.js');
   // the 上传区/查询统计卡片 the manual promises must be the cards admin.html renders
   assert.ok(manual.includes('顶部提供上传区与查询统计卡片'), 'manual §3.2 must promise the upload area and stats cards');
   assert.match(adminHtml, /<h2>上传文档<\/h2>/, 'manual §3.2 upload card must exist in admin.html');
