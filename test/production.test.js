@@ -1777,7 +1777,7 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   assert.match(dsg, /multer memoryStorage 不落盘/, '设计说明书 §3.12(6) must doc the in-memory upload buffer');
   assert.match(appSrc, /multer\.memoryStorage\(\)/, 'app must keep uploads in memory only');
 
-  // ---- 设计说明书 §1.2 项目背景 / §1.4 参考资料（§1.3 术语已由上文 FTS5/bigram/BM25/分块 needles 覆盖）
+  // ---- 设计说明书 §1.2 项目背景 / §1.4 参考资料
   assert.match(dsg, /不依赖任何外部大模型或向量数据库/, '设计说明书 §1.2 must promise no external models/vector DB');
   assert.ok(
     !(/(?:fetch\(|https\.request|http\.request)/.test(kbSrc + storageSrc)),
@@ -1786,6 +1786,22 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   assert.match(dsg, /软件全称：RAG-Desk 垂直行业知识库问答系统/, '设计说明书 §1.2 must state the full product name');
   assert.strictEqual(pkg.name, 'rag-desk', 'pkg.name must match the 软件简称 RAG-Desk');
   assert.strictEqual(pkg.version, '1.0.0', 'pkg.version must match the 版本 V1.0');
+
+  // ---- 设计说明书 §1.3 定义（术语表：每个术语必须对应真实实现）
+  assert.match(dsg, /RAG    Retrieval-Augmented Generation，检索增强生成/, '设计说明书 §1.3 RAG term must keep the full English expansion');
+  assert.match(dsg, /FTS5   SQLite 内置的全文检索扩展，支持 BM25 相关度排序/, '设计说明书 §1.3 FTS5 term must stay SQLite built-in + BM25');
+  assert.match(storageSrc, /tokenize='unicode61'/, '§1.3 FTS5 term must be the unicode61 tokenizer storage actually uses');
+  assert.match(dsg, /bigram 二元切词，将连续中文字符串切成相邻二字的词元/, '设计说明书 §1.3 bigram term must describe adjacent-2-char n-grams');
+  assert.match(tokenizerSrc, /overlapping n-grams \(default bigrams\)/, '§1.3 bigram term must match the tokenizer default');
+  assert.match(dsg, /BM25   经典概率检索排序模型[\s\S]*?计算查询与文档片段的相关度/, '设计说明书 §1.3 BM25 term must stay the probabilistic ranking model');
+  assert.match(storageSrc, /bm25\(fts\)/, '§1.3 BM25 term must be the ranker storage runs in search');
+  assert.match(dsg, /分块   将长文档按窗口与段落切分为相互独立但带有重叠的检索单元/, '设计说明书 §1.3 分块 term must promise window/paragraph splits with overlap');
+  assert.match(chunkerSrc, /const overlap = Math\.min\(opts\.overlap \?\? 40, window - 1\)/, '§1.3 分块 overlap must be the chunker 40-char default');
+  assert.match(chunkerSrc, /rest = rest\.slice\(cut - overlap\)/, '§1.3 分块 must carry overlap between windows in chunker');
+  assert.match(dsg, /倒排表 FTS5 内部按词元建立的[“"]词元—文档\/行[”"]映射索引结构/, '设计说明书 §1.3 倒排表 term must describe the FTS5 term→row index');
+  assert.match(storageSrc, /CREATE VIRTUAL TABLE IF NOT EXISTS fts/, '§1.3 倒排表 term: the rowid-keyed FTS virtual table must remain storage.js');
+
+  // ---- 设计说明书 §1.4 参考资料
   assert.match(pkg.dependencies.express, /\^4\./, '§1.4 must stay on Express 4 as cited');
   assert.ok(pkg.dependencies.multer, '§1.4 multer must remain a runtime dependency');
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'SPEC.md')), '§1.4 must cite a real SPEC.md');
