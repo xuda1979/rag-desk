@@ -1022,6 +1022,11 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   // ---- 非目标: single-tenant is not a storage abstraction — no customer_id anywhere
   assert.doesNotMatch(storageSrc, /customer_id|tenant_id/, 'SPEC 非目标 single-tenant must hold in storage');
 
+  // ---- 非目标: no knowledge-graph machinery (graph/triple store) in the retrieval path
+  assert.ok(spec.includes('复杂知识图谱'), 'SPEC must keep 复杂知识图谱 in its 非目标 block');
+  assert.doesNotMatch(storageSrc, /\bgraph\b/i, 'SPEC 非目标 复杂知识图谱 must hold in storage');
+  assert.doesNotMatch(kbSrc, /\bgraph\b/i, 'SPEC 非目标 复杂知识图谱 must hold in knowledge');
+
   // ---- AC: an embedded chat widget + API endpoint (README 嵌入浮窗 lock covers the snippet)
   assert.ok(spec.includes('嵌入式聊天浮窗'), 'SPEC must promise the embeddable chat widget');
   assert.ok(spec.includes('API endpoint'), 'SPEC must promise the API endpoint');
