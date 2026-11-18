@@ -1518,6 +1518,10 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const { DOMAINS } = require('../src/lib/domains');
   const { fileKind } = require('../src/lib/extractors');
+  const { CORPUS_FILES } = require('../scripts/fixture-content');
+  const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const demoJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'demo.js'), 'utf8');
+  const adminHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.html'), 'utf8');
 
   // ---- §2.1 runtime: manual requires Node >= 22.5.0 = package.json engines
   assert.match(manual, /Node\.js ≥ 22\.5\.0/, 'manual §2.1 must state the Node requirement');
@@ -1532,8 +1536,18 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.match(dockerfile, /\/api\/health/, 'manual §2.3 healthcheck must exist in Dockerfile');
   assert.match(compose, /\/api\/health/, 'manual §2.3 healthcheck must exist in docker-compose');
 
-  // ---- §2.4 first start: auto-seed when the DB was not initialized
+  // ---- §2.4 first start: auto-seed when the DB was not initialized — the gate
+  // named in the manual, the seeded flag it persists, and the demo corpus files
+  // it promises (法律/诊所/招采公告) are real seeds on disk
   assert.match(serverSrc, /getSetting\('seeded'\)/, 'manual §2.4 auto-seed gate must exist in server.js');
+  assert.match(serverSrc, /setSetting\('seeded', '1'\)/, 'manual §2.4 must persist the seeded flag after auto-seeding');
+  assert.match(serverSrc, /seedIfNeeded/, 'manual §2.4 auto-seed must invoke seedIfNeeded');
+  const corpusDir = path.join(__dirname, '..', 'fixtures', 'corpus');
+  for (const f of ['law-faq.md', 'clinic-faq.md', 'bid-announcement.md']) {
+    assert.ok(Object.keys(CORPUS_FILES).includes(f), `manual §2.4 corpus member ${f} must be a seeded fixture`);
+    assert.ok(fs.existsSync(path.join(corpusDir, f)), `manual §2.4 corpus member ${f} must exist on disk`);
+  }
+  assert.match(manual, /法律\/诊所\/招采公告/, 'manual §2.4 must promise the 法律/诊所/招采公告 corpus');
 
   // ---- §3.1 demo page: the four preset domains and the three example questions
   for (const q of ['律师咨询费怎么收取？', '挂号需要带什么？', '儿童接种疫苗时间？']) {
@@ -1548,11 +1562,29 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   }
   assert.ok(domainText.includes('法律 · 律师事务所'), 'manual 法律 domain must match the served label');
 
+  // ---- §3.1 demo page UI prose: chat box, 发送 on submit, 引用来源 citations
+  // (document name + paragraph number + excerpt), domain-switch greeting, and
+  // clickable example questions must match the real demo page
+  assert.ok(manual.includes('回车或点击发送'), 'manual §3.1 must document Enter/submit sending');
+  assert.match(indexHtml, /<button type="submit">发送<\/button>/, 'manual §3.1 发送 button must be the demo form submit');
+  assert.ok(manual.includes('引用来源'), 'manual §3.1 must document the citations block');
+  assert.ok(manual.includes('文档名、段落号与原文摘录'), 'manual §3.1 must describe the citation fields');
+  assert.match(demoJs, /class="bot-cite"/, 'manual §3.1 citations must be rendered by demo.js');
+  assert.match(demoJs, /class="cite-doc">\$?\{esc\(c\.document\)\}/, 'manual §3.1 citation must show the matched document name');
+  assert.match(demoJs, /§\$\{c\.paragraph\}/, 'manual §3.1 citation must show the paragraph number');
+  assert.ok(manual.includes('问候语与话术随之变化'), 'manual §3.1 must promise the greeting change on domain switch');
+  assert.ok(demoJs.includes('greetingEl.textContent = d.greeting'), 'manual §3.1 greeting swap must exist in demo.js');
+  assert.ok(manual.includes('点击示例问题可直接提问'), 'manual §3.1 must promise clickable example questions');
+  assert.match(demoJs, /form\.requestSubmit\(\)/, 'manual §3.1 clicking an example must submit the chat form');
+
   // ---- §3.2 admin: token gating via x-admin-token, assented in the browser
   assert.ok(manual.includes('x-admin-token'), 'manual §3.2 must document the x-admin-token header');
   assert.ok(manual.includes('RAGDESK_ADMIN_TOKEN'), 'manual §3.2 must name RAGDESK_ADMIN_TOKEN');
   assert.ok(adminSrc.includes("'ragdesk-admin-token'"), 'admin.js must persist the token under the manual-documented key');
   assert.ok(adminSrc.includes("headers['x-admin-token']"), 'admin.js must send x-admin-token as the manual documents');
+  // the doc list column the manual describes must be the one admin.html renders
+  assert.ok(manual.includes('上传时间'), 'manual §3.2 doc list must label the upload timestamp');
+  assert.match(adminHtml, /上传时间/, 'manual §3.2 上传时间 column must exist in admin.html');
 
   // ---- §3.3 upload: formats, 50MB, 20-per-batch, indexed/duplicate/error results
   assert.ok(manual.includes('50MB'), 'manual §3.3 must cap files at 50MB');
@@ -1567,9 +1599,31 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.match(kbSrc, /action: 'duplicate'/, 'manual duplicate result must exist in knowledge.js');
   assert.match(kbSrc, /action: 'error'/, 'manual error result must exist in knowledge.js');
 
+  // ---- §3.3 dedup/delete mechanics: the 内容摘要 dedup hit and the delete
+  // cascade that keeps 引用不再命中 are real storage paths
+  assert.ok(manual.includes('按内容摘要自动识别并返回 duplicate'), 'manual §3.3 must promise content-digest dedup');
+  assert.match(kbSrc, /_sha256\(buffer\)/, 'manual §3.3 digest dedup must hash each upload in knowledge.js');
+  assert.match(kbSrc, /getDocBySha/, 'manual §3.3 dedup must look up the digest in knowledge.js');
+  assert.match(storageSrc, /getDocBySha\(sha256\)/, 'manual §3.3 dedup lookup must exist in storage.js');
+  assert.ok(manual.includes('移除文档及其全部分块与索引'), 'manual §3.3 must promise the delete cascade');
+  assert.match(storageSrc, /DELETE FROM fts WHERE rowid = \?/, 'manual §3.3 delete must clear the doc FTS index');
+  assert.match(storageSrc, /DELETE FROM chunks WHERE doc_id = \?/, 'manual §3.3 delete must clear the doc chunks');
+  assert.match(storageSrc, /DELETE FROM docs WHERE id = \?/, 'manual §3.3 delete must remove the doc row');
+  assert.match(manual, /删除后相关\s*引用即不再命中/, 'manual §3.3 must promise citations stop matching after delete');
+
   // ---- §3.4 stats: total / with_answer / 命中率 served by the storage query
   assert.ok(manual.includes('with_answer'), 'manual §3.4 must document the with_answer stat');
   assert.match(storageSrc, /AS with_answer/, 'manual with_answer stat must exist in storage.js stats');
+
+  // ---- §3.4 log fields: the recent-query columns the manual lists (问题、时间、
+  // 命中数、来源文档) must be the columns admin.html renders and admin.js fills
+  assert.ok(manual.includes('问题、时间、命中数、来源文档'), 'manual §3.4 must list the recent-query log columns');
+  assert.match(adminHtml, /<th>时间<\/th><th>查询<\/th>/, 'manual §3.4 log time/query columns must exist in admin.html');
+  assert.match(adminHtml, /来源文档/, 'manual §3.4 来源文档 log column must exist in admin.html');
+  assert.match(adminSrc, /l\.created_at/, 'manual §3.4 log time must be filled from created_at in admin.js');
+  assert.match(adminSrc, /l\.query/, 'manual §3.4 log query must be filled from query in admin.js');
+  assert.match(adminSrc, /l\.matched \|\| 0/, 'manual §3.4 命中数 must be filled from matched in admin.js');
+  assert.match(adminSrc, /l\.top_filename/, 'manual §3.4 来源文档 must be filled from top_filename in admin.js');
 
   // ---- §3.5 widget: every data-* attribute and the Bearer header
   for (const attr of ['data-api', 'data-domain', 'data-title', 'data-greeting', 'data-token']) {
