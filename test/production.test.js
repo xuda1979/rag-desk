@@ -1428,3 +1428,121 @@ test('prod: gen-submission-docs CLI regenerates the docs in place and exits 0', 
   assert.strictEqual(gen.patchRegister(c, reg), reg, 'CLI run must not mutate the committed 登记表');
   assert.strictEqual(gen.patchDesign(c, dsg), dsg, 'CLI run must not mutate the committed 设计说明书');
 });
+
+test('prod: 用户手册.txt operating claims hold against the implementation', () => {
+  // 用户手册.txt is the operator-facing submission doc: its install steps, env
+  // table, upload limits, widget recipe, domain presets and FAQ error codes must
+  // stay true to what src/ actually does. Every claim below is pinned to a
+  // source needle so an operator following the manual gets the real product.
+  const manual = fs.readFileSync(path.join(SUBDIR, '用户手册.txt'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+  const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
+  const widgetSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'widget.js'), 'utf8');
+  const adminSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.js'), 'utf8');
+  const compose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml'), 'utf8');
+  const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const { DOMAINS } = require('../src/lib/domains');
+  const { fileKind } = require('../src/lib/extractors');
+
+  // ---- §2.1 runtime: manual requires Node >= 22.5.0 = package.json engines
+  assert.match(manual, /Node\.js ≥ 22\.5\.0/, 'manual §2.1 must state the Node requirement');
+  assert.ok(pkg.engines && />=22\.5\.0/.test(pkg.engines.node), 'package.json engines must match the manual Node requirement');
+
+  // ---- §2.2/§2.3 install: default port 3000, docker volume + healthcheck
+  assert.match(serverSrc, /PORT \|\| 3000/, 'manual §2.2 default port 3000 must match server.js');
+  assert.ok(manual.includes('npm run seed'), 'manual §2.2 must document npm run seed');
+  assert.ok(manual.includes('npm start'), 'manual §2.2 must document npm start');
+  assert.ok(compose.includes('ragdesk-data:/app/data'), 'manual §2.3 named volume must exist in docker-compose');
+  assert.ok(manual.includes('ragdesk-data'), 'manual §2.3 must document the named volume');
+  assert.match(dockerfile, /\/api\/health/, 'manual §2.3 healthcheck must exist in Dockerfile');
+  assert.match(compose, /\/api\/health/, 'manual §2.3 healthcheck must exist in docker-compose');
+
+  // ---- §2.4 first start: auto-seed when the DB was not initialized
+  assert.match(serverSrc, /getSetting\('seeded'\)/, 'manual §2.4 auto-seed gate must exist in server.js');
+
+  // ---- §3.1 demo page: the four preset domains and the three example questions
+  for (const q of ['律师咨询费怎么收取？', '挂号需要带什么？', '儿童接种疫苗时间？']) {
+    assert.ok(manual.includes(q), `manual §3.1 must list example question ${q}`);
+  }
+  const domainText = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'domains.js'), 'utf8');
+  assert.ok(manual.includes('法律/医疗/招采/通用'), 'manual §3.1 must document the four domain switch options');
+  assert.ok(DOMAINS.legal && DOMAINS.medical && DOMAINS.procurement && DOMAINS.general, 'the four manual domains must be served presets');
+  // each manual example question must be a served preset's exampleQuestions entry
+  for (const [q, id] of [['律师咨询费怎么收取？', 'legal'], ['挂号需要带什么？', 'medical'], ['儿童接种疫苗时间？', 'medical']]) {
+    assert.ok(DOMAINS[id].exampleQuestions.includes(q), `example ${q} must live in served preset ${id}`);
+  }
+  assert.ok(domainText.includes('法律 · 律师事务所'), 'manual 法律 domain must match the served label');
+
+  // ---- §3.2 admin: token gating via x-admin-token, assented in the browser
+  assert.ok(manual.includes('x-admin-token'), 'manual §3.2 must document the x-admin-token header');
+  assert.ok(manual.includes('RAGDESK_ADMIN_TOKEN'), 'manual §3.2 must name RAGDESK_ADMIN_TOKEN');
+  assert.ok(adminSrc.includes("'ragdesk-admin-token'"), 'admin.js must persist the token under the manual-documented key');
+  assert.ok(adminSrc.includes("headers['x-admin-token']"), 'admin.js must send x-admin-token as the manual documents');
+
+  // ---- §3.3 upload: formats, 50MB, 20-per-batch, indexed/duplicate/error results
+  assert.ok(manual.includes('50MB'), 'manual §3.3 must cap files at 50MB');
+  assert.ok(manual.includes('20 个'), 'manual §3.3 must cap a batch at 20 files');
+  assert.match(appSrc, /fileSize: 50 \* 1024 \* 1024/, 'manual §3.3 50MB cap must match app.js');
+  assert.match(appSrc, /upload\.array\('files', 20\)/, 'manual §3.3 20-file cap must match app.js');
+  for (const f of ['.md', '.txt', '.csv', '.pdf', '.docx']) {
+    assert.ok(manual.includes(f), `manual §3.3 must list supported format ${f}`);
+    assert.ok(fileKind(`doc${f}`), `format ${f} must be served by fileKind`);
+  }
+  assert.match(kbSrc, /action: 'indexed'/, 'manual indexed result must exist in knowledge.js');
+  assert.match(kbSrc, /action: 'duplicate'/, 'manual duplicate result must exist in knowledge.js');
+  assert.match(kbSrc, /action: 'error'/, 'manual error result must exist in knowledge.js');
+
+  // ---- §3.4 stats: total / with_answer / 命中率 served by the storage query
+  assert.ok(manual.includes('with_answer'), 'manual §3.4 must document the with_answer stat');
+  assert.match(storageSrc, /AS with_answer/, 'manual with_answer stat must exist in storage.js stats');
+
+  // ---- §3.5 widget: every data-* attribute and the Bearer header
+  for (const attr of ['data-api', 'data-domain', 'data-title', 'data-greeting', 'data-token']) {
+    assert.ok(manual.includes(attr), `manual §3.5 must document the ${attr} attribute`);
+    assert.match(widgetSrc, new RegExp(`getAttribute\\('${attr}'`), `widget.js must read ${attr} as the manual documents`);
+  }
+  assert.ok(manual.includes('Authorization: Bearer'), 'manual §3.5 must document the Bearer header');
+  assert.match(widgetSrc, /headers\.Authorization = 'Bearer ' \+ TOKEN/, 'widget.js must send the Bearer token as documented');
+  assert.ok(manual.includes('RAGDESK_ALLOW_ORIGIN'), 'manual §3.5 must document RAGDESK_ALLOW_ORIGIN CORS control');
+
+  // ---- §3.6 curl example: the corpus file it uploads must exist on disk
+  assert.ok(manual.includes('-F "files=@./fixtures/corpus/clinic-faq.md"'), 'manual §3.6 must show the real fixture upload curl');
+
+  // ---- §4.1 env table: every variable documented is read, defaults match
+  const envReads = [
+    ['PORT', serverSrc, 'process.env.PORT'],
+    ['RAGDESK_DB', serverSrc, 'process.env.RAGDESK_DB'],
+    ['RAGDESK_ADMIN_TOKEN', appSrc, 'process.env.RAGDESK_ADMIN_TOKEN'],
+    ['RAGDESK_CHAT_TOKEN', appSrc, 'process.env.RAGDESK_CHAT_TOKEN'],
+    ['RAGDESK_ALLOW_ORIGIN', appSrc, 'process.env.RAGDESK_ALLOW_ORIGIN'],
+  ];
+  for (const [varName, src, needle] of envReads) {
+    assert.ok(manual.includes(varName), `manual §4.1 must document ${varName}`);
+    assert.ok(src.includes(needle), `${varName} documented in manual must actually be read (${needle})`);
+  }
+  assert.match(serverSrc, /RAGDESK_DB \|\| path\.join\(ROOT, 'data', 'ragdesk\.db'\)/, 'manual §4.1 default DB path must match server.js');
+
+  // ---- §4.3 optional LLM: off by default, injected summarizer opt-in
+  assert.match(kbSrc, /mode: 'offline-retrieval'/, 'manual §4.3 offline default must exist in knowledge.js');
+  assert.match(kbSrc, /llm: false/, 'manual §4.3 LLM-off default must hold in knowledge.js');
+  assert.ok(appSrc.includes('llmEnabled: false'), 'manual §4.3 llmEnabled=false must hold in app.js health');
+  assert.ok(manual.includes('mockSummarizer'), 'manual §4.3 must document the mock summarizer');
+
+  // ---- §5.2 Q6: FTS query errors degrade to LIKE scan
+  assert.ok(manual.includes('LIKE'), 'manual §5.2 Q6 must document the LIKE 降级 fallback');
+  assert.match(storageSrc, /body LIKE \? COLLATE NOCASE/, 'manual LIKE 降级 must have a LIKE fallback in storage.js');
+
+  // ---- §5.3 Q7 formats: .markdown documented and served
+  assert.ok(manual.includes('.markdown'), 'manual §5.3 Q7 must list .markdown');
+  assert.strictEqual(fileKind('doc.markdown'), 'markdown', '.markdown must be served by fileKind');
+  // ---- §5.3 Q8: empty-file message exists verbatim
+  assert.ok(manual.includes('文件内容为空，无法索引'), 'manual §5.3 Q8 must quote the empty-file error');
+  assert.match(kbSrc, /文件内容为空，无法索引/, 'the manual-quoted empty-file error must exist in knowledge.js');
+  // ---- §5.3 Q9: 400/413 error mapping (fixed from the stale 121/413)
+  assert.ok(manual.includes('上传 400/413 错误'), 'manual §5.3 Q9 must document the 400/413 codes');
+  assert.match(appSrc, /'LIMIT_FILE_SIZE' \? 413/, '413 must map to file-too-large in app.js');
+  assert.match(appSrc, /'LIMIT_UNEXPECTED_FILE' \? 400/, '400 must map to too-many-files in app.js');
+});
