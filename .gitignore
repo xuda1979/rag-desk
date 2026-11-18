@@ -1,6 +1,7 @@
 node_modules/
 data/
 .future-code/
+.tmp/
 *.log
 .DS_Store
 20-rag-desk-软件著作权申请/
