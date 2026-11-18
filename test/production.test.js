@@ -1457,6 +1457,9 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   const domSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'domains.js'), 'utf8');
   const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
   const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+  const widgetSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'widget.js'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const { DOMAINS } = require('../src/lib/domains');
   const { fileKind } = require('../src/lib/extractors');
 
@@ -1553,6 +1556,173 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   assert.match(storageSrc, /journal_mode=WAL/, 'storage must enable WAL');
   assert.match(dsg, /foreign_keys/, '设计说明书 storage section must document FK enforcement');
   assert.match(storageSrc, /foreign_keys=ON/, 'storage must enforce foreign keys');
+
+  // ---- 设计说明书 §2.2 运行环境
+  assert.match(dsg, /Node\.js ≥ 22\.5\.0/, '设计说明书 §2.2 must state the Node floor');
+  assert.strictEqual(pkg.engines.node, '>=22.5.0', 'package.json engines must match the §2.2 Node floor');
+  assert.match(dsg, /WAL 模式 \+ FTS5 扩展/, '设计说明书 §2.2 must promise WAL + FTS5');
+  assert.match(storageSrc, /VIRTUAL TABLE IF NOT EXISTS fts USING fts5\(/, 'storage must declare an FTS5 virtual table');
+  assert.match(dsg, /内置 node:sqlite/, '设计说明书 §2.2 must promise built-in node:sqlite');
+  assert.match(storageSrc, /DatabaseSync/, 'storage must use node:sqlite DatabaseSync');
+
+  // ---- 设计说明书 §2.1.1 功能需求 FR1-FR7
+  assert.match(dsg, /FR1 知识摄入：支持 Markdown、TXT、CSV、DOCX、PDF 的导入与入库/, '设计说明书 FR1 must list the intake formats');
+  assert.match(dsg, /重复文档（按内容 SHA-256）幂等处理，不重复索引/, '设计说明书 FR1 must promise sha256 idempotent dedup');
+  assert.match(kbSrc, /this\.storage\.getDocBySha\(sha\)/, 'knowledge must dedup by getDocBySha');
+  assert.match(dsg, /FR2 中文检索：支持中文短查询（2~3 字）命中/, '设计说明书 FR2 must promise 2~3 char short-query hits');
+  assert.match(tokenizerSrc, /Benign ascii words/, 'tokenizer doc comment must stay honest about latin runs');
+  assert.match(dsg, /按 BM25 相关度返回 Top-N\s+知识片段及其来源文档与段落号/, '设计说明书 FR2 must promise BM25 Top-N + provenance');
+  assert.match(storageSrc, /ORDER BY score ASC/, 'storage must rank FTS hits by ascending BM25 (best first)');
+  assert.match(kbSrc, /paragraph: c\.chunkIndex/, 'answer citations must carry the paragraph number');
+  assert.match(dsg, /FR3 离线问答：给出“引导语 \+ 检索原文摘录 \+ 兜底语”的答案/, '设计说明书 FR3 must promise lead+excerpt+footer answers');
+  assert.match(kbSrc, /\$\{lead\}\\n\\n\$\{excerpt\}\\n\\n\$\{domainCfg\.footer\}/, 'knowledge must assemble lead+excerpt+footer offline answers');
+  assert.match(kbSrc, /llm: false/, 'offline answer must declare llm:false');
+  assert.match(dsg, /FR5 管理后台：文档列表、分块预览、删除、批量上传、查询日志与统计/, '设计说明书 FR5 must promise the admin feature set');
+  assert.match(dsg, /FR6 嵌入能力：widget\.js 可在第三方站点嵌入聊天浮窗；支持跨域与鉴权/, '设计说明书 FR6 must promise widget embedding + CORS + auth');
+  assert.match(widgetSrc, /data-api/, 'widget must read the data-api attribute');
+  assert.match(widgetSrc, /data-token/, 'widget must read the data-token attribute');
+  assert.match(dsg, /FR7 查询记录：每次问答写入日志，供统计命中率与追溯/, '设计说明书 FR7 must promise per-query logging');
+  assert.match(storageSrc, /INSERT INTO queries_log/, 'storage must write every query to queries_log');
+  assert.match(appSrc, /kb\.logQuery/, 'app must log queries from the chat route');
+
+  // ---- 设计说明书 §2.1.2 性能需求
+  assert.match(dsg, /查询 P95 响应 < 300ms/, '设计说明书 §2.1.2 must state the P95 budget');
+  assert.match(dsg, /单文件上传上限 50MB；单次上传文件数 ≤ 20/, '设计说明书 §2.1.2 must state the upload caps');
+  assert.match(appSrc, /fileSize: 50 \* 1024 \* 1024/, 'app must cap single files at 50MB');
+  assert.match(appSrc, /upload\.array\('files', 20\)/, 'app must cap uploads at 20 files');
+
+  // ---- 设计说明书 §2.1.3 可靠性需求
+  assert.match(dsg, /事务化入库（BEGIN IMMEDIATE\/COMMIT\/ROLLBACK）/, '设计说明书 §2.1.3 must promise transactional ingest');
+  assert.match(storageSrc, /BEGIN IMMEDIATE/, 'storage insertChunks must BEGIN IMMEDIATE');
+  assert.match(storageSrc, /this\.db\.exec\('COMMIT'\)/, 'storage must COMMIT a successful ingest');
+  assert.match(dsg, /查询语法异常自动降级为 LIKE 扫描/, '设计说明书 §2.1.3 must promise the FTS→LIKE degrade');
+  assert.match(storageSrc, /LIKE \? COLLATE NOCASE/, 'storage degrade path must scan with LIKE NOCASE');
+  assert.match(dsg, /解析失败仅报告该文件，不影响其余/, '设计说明书 §2.1.3 must promise per-file failure isolation');
+  assert.match(kbSrc, /action: 'error'/, 'knowledge digest failures must return a per-file error action');
+
+  // ---- 设计说明书 §2.1.4 安全需求
+  assert.match(dsg, /聊天端 Bearer 令牌（Authorization）可选\s+校验/, '设计说明书 §2.1.4 must promise both token gates');
+  assert.match(appSrc, /req\.get\('x-admin-token'\)/, 'app must gate admin on x-admin-token');
+  assert.match(appSrc, /Bearer \$\{chatToken\}/, 'app chatAuth must require an exact Bearer token');
+  assert.match(dsg, /跨域来源可由 RAGDESK_ALLOW_ORIGIN 限制/, '设计说明书 §2.1.4 must name the CORS env');
+  assert.match(appSrc, /allowOrigin === '\*' \? '\*' : \(allowOrigin \|\| origin\)/, 'app CORS must reflect the configured origin');
+  assert.match(dsg, /数据不出机器/, '设计说明书 §2.1.4 must promise local-only data');
+
+  // ---- 设计说明书 §2.3 设计概念与数据流
+  assert.match(dsg, /LLM 摘要为\s+可选开关（默认关闭）/, '设计说明书 §2.3.1 must mark LLM off by default');
+  assert.match(kbSrc, /answerWithLlm\(query/, 'knowledge must expose the optional LLM answer path');
+  assert.match(dsg, /扩展词元 \+ 原始文本（UNINDEXED）/, '设计说明书 §2.3.1 must promise unindexed original text');
+  assert.match(dsg, /原始文本.*UNINDEXED/, '设计说明书 §2.3.1 must promise the UNINDEXED original column');
+  assert.match(storageSrc, /orig UNINDEXED/, 'storage fts table must keep orig unindexed');
+  assert.match(dsg, /中文查询扩为 OR 模式二元词/, '设计说明书 §2.3.1 must promise OR-mode bigram expansion');
+  assert.match(dsg, /tokens, orig/, '设计说明书 §2.3.2 must name the fts (tokens, orig) columns');
+  assert.match(storageSrc, /insFts\.run\(id, expandForIndex\(c\.text\)\.join\(' '\), c\.text\)/, 'storage must write expanded bigram tokens + orig text');
+  assert.match(dsg, /计算 SHA-256\n    → 与 docs 表查重/, '设计说明书 §2.3.2 must prescribe de-dupe before insert');
+  assert.match(kbSrc, /const sha = this\._sha256\(buffer\)/, 'knowledge must hash the buffer before insert');
+  assert.match(dsg, /toQuery 构造 FTS5 MATCH 表达式/, '设计说明书 §2.3.3 must name toQuery for MATCH');
+  assert.match(storageSrc, /const q = toQuery\(queryText\)/, 'storage must build the MATCH from toQuery');
+  assert.match(dsg, /confidenceScore 计算置信度/, '设计说明书 §2.3.3 must name confidenceScore');
+  assert.match(kbSrc, /function confidenceScore/, 'knowledge must implement confidenceScore');
+  assert.match(dsg, /组装 answer（lead\+摘录\+footer）/, '设计说明书 §2.3.3 must name the answer assembly');
+  assert.match(dsg, /写 queries_log/, '设计说明书 §2.3.3 must name the queries_log write');
+  assert.match(dsg, /server\.js ──> app\.js ──> knowledge\.js ──> storage\.js ──> node:sqlite/, '设计说明书 §2.3.4 must draw the module chain');
+  assert.match(appSrc, /function buildApp\(kb/, 'app must accept knowledge via buildApp');
+  assert.match(dsg, /scripts\/seed-fixtures\.js/, '设计说明书 §2.3.4 must name the seed script');
+  assert.match(serverSrc, /require\('\.\.\/scripts\/seed-fixtures'\)/, 'server must require seed-fixtures');
+
+  // ---- 设计说明书 §2.4 结构（模块划分）
+  assert.match(dsg, /“表现层—服务层—数据层”分层/, '设计说明书 §2.4 must promise the three-layer split');
+  assert.match(dsg, /docs\/chunks\/fts\/queries_log\/settings/, '设计说明书 §2.4 must list the storage tables');
+  assert.match(storageSrc, /CREATE TABLE IF NOT EXISTS queries_log/, 'storage must create queries_log');
+
+  // ---- 设计说明书 §3.9.1 HTTP 接口（11 行）
+  const dsgFlat = dsg.replace(/\s+/g, ' ');
+  for (const row of [
+    'GET   /api/health',
+    'POST  /api/chat',
+    'GET   /api/domains',
+    'GET   /api/admin/docs',
+    'GET   /api/admin/docs/:id',
+    'DELETE /api/admin/docs/:id',
+    'POST  /api/admin/upload',
+    'GET   /api/admin/logs',
+    'GET   /api/admin/stats',
+    'GET   /widget.js',
+    'GET   /、/admin',
+  ]) {
+    assert.ok(dsgFlat.includes(row.replace(/\s+/g, ' ').trim()), `设计说明书 §3.9.1 must list route '${row.trim()}'`);
+  }
+  assert.match(appSrc, /app\.get\('\/api\/health'/, 'health route must exist');
+  assert.match(appSrc, /app\.get\('\/api\/domains'/, 'domains route must exist');
+  assert.match(appSrc, /app\.get\('\/widget\.js'/, 'widget route must exist');
+  assert.match(appSrc, /res\.status\(404\)\.json\(\{ error: 'not found' \}\)/, 'unknown /api paths must get JSON 404');
+
+  // ---- 设计说明书 §3.9.2 内部模块接口
+  assert.match(dsg, /knowledge ↔ storage（方法见 3\.3）/, '设计说明书 §3.9.2 must draw the knowledge↔storage line');
+  assert.match(kbSrc, /require\('\.\/storage'\)/, 'knowledge must require storage');
+  assert.match(dsg, /app ↔ knowledge（answer\/ingest\/log\/stats）/, '设计说明书 §3.9.2 must draw the app↔knowledge line');
+  assert.match(appSrc, /kb\.answer\(String\(query\)/, 'app chat route must call kb.answer');
+
+  // ---- 设计说明书 §3.9.3 嵌入接口（修正后：以 Bearer 鉴权表述，无 /api/health 探测）
+  assert.match(dsg, /<script src="\/widget\.js" data-api="\.\.\." data-domain="\.\.\." data-title="\.\.\." data-token="\.\.\.">/, '设计说明书 §3.9.3 must document the data-* attributes');
+  assert.match(dsg, /浮窗内部调用 POST \/api\/chat（配置 RAGDESK_CHAT_TOKEN 时带 Bearer 鉴权）/,
+    '设计说明书 §3.9.3 must state the Bearer-auth contract, not an /api/health probe');
+  assert.ok(!/api\/health/.test(widgetSrc), 'widget must not probe /api/health');
+  assert.match(widgetSrc, /headers\.Authorization = 'Bearer ' \+ TOKEN/, 'widget must send Bearer when a token is configured');
+
+  // ---- 设计说明书 §3.10 数据结构与数据库设计
+  assert.match(dsg, /sha256 内容指纹查重\n    （应用层 getDocBySha 幂等去重，非数据库 UNIQUE）/, '设计说明书 §3.10 must doc app-layer dedup, not a DB UNIQUE');
+  assert.ok(!/sha256\s+TEXT NOT NULL UNIQUE/.test(storageSrc), 'storage docs.sha256 must NOT be UNIQUE');
+  assert.match(storageSrc, /getDocBySha\(sha256\)/, 'storage must expose getDocBySha');
+  assert.match(dsg, /status DEFAULT 'ready'/, '设计说明书 §3.10 must doc the default status');
+  assert.match(storageSrc, /DEFAULT 'ready'/, 'storage docs.status must default to ready');
+  assert.match(dsg, /created_at\/updated_at DEFAULT datetime\('now'\)/, '设计说明书 §3.10 must doc the now() timestamps');
+  assert.match(storageSrc, /DEFAULT \(datetime\('now'\)\)/, 'storage must default timestamps to datetime(now)');
+  assert.match(dsg, /REFERENCES docs\(id\) ON DELETE CASCADE/, '设计说明书 §3.10 must promise cascading deletes');
+  assert.match(storageSrc, /REFERENCES docs\(id\) ON DELETE CASCADE/, 'storage chunks must cascade on doc delete');
+  assert.match(dsg, /索引 idx_chunks_doc\(doc_id\)/, '设计说明书 §3.10 must doc the chunks index');
+  assert.match(storageSrc, /idx_chunks_doc ON chunks\(doc_id\)/, 'storage must create idx_chunks_doc');
+  assert.match(dsg, /orig UNINDEXED/, '设计说明书 §3.10 must doc the unindexed body column');
+  assert.match(dsg, /索引 idx_queries_created\(created_at\)/, '设计说明书 §3.10 must doc the log index');
+  assert.match(storageSrc, /idx_queries_created ON queries_log\(created_at\)/, 'storage must create idx_queries_created');
+  assert.match(dsg, /key PK；value /, '设计说明书 §3.10 must doc the settings table');
+  assert.match(storageSrc, /key   TEXT PRIMARY KEY/, 'storage settings.key must be the primary key');
+  assert.match(serverSrc, /getSetting\('seeded'\)/, 'server must gate first-run seeding on the seeded setting');
+
+  // ---- 设计说明书 §3.11 出错处理设计（8 条）
+  assert.match(dsg, /ingestBuffer 捕获异常 → \{action:'error', error\}/, '设计说明书 §3.11(1) must promise per-file error capture');
+  assert.match(kbSrc, /catch \(e\) \{\n      return \{ action: 'error'/, 'knowledge must wrap ingest failures as error actions');
+  assert.match(dsg, /分块为 0 → 拒绝入库，不残留 docs 孤儿行/, '设计说明书 §3.11(2) must promise empty-content rejection');
+  assert.match(kbSrc, /文件内容为空，无法索引/, 'knowledge must reject empty content with a clear error');
+  assert.match(dsg, /捕获后降级 LIKE 扫描，保证服务可用/, '设计说明书 §3.11(3) must promise the LIKE fallback');
+  assert.match(dsg, /multer LIMIT_FILE_SIZE\/LIMIT_UNEXPECTED_FILE → 413\/400 JSON/, '设计说明书 §3.11(4) must doc multer code mapping');
+  assert.match(appSrc, /err\.code === 'LIMIT_FILE_SIZE' \? 413/, 'app must map LIMIT_FILE_SIZE to 413');
+  assert.match(appSrc, /err\.code === 'LIMIT_UNEXPECTED_FILE' \? 400/, 'app must map unexpected files to 400');
+  assert.match(dsg, /GET\/DELETE 返回 404 JSON/, '设计说明书 §3.11(5) must promise 404 JSON for missing docs');
+  assert.match(appSrc, /res\.status\(404\)\.json\(\{ error: 'not found' \}\)/, 'missing docs must 404 as JSON');
+  assert.match(dsg, /express entity\.too\.large → 413/, '设计说明书 §3.11(6) must doc the body-too-large mapping');
+  assert.match(appSrc, /err\.type === 'entity\.too\.large' \? 413/, 'app must map entity.too.large to 413');
+  assert.match(appSrc, /express\.json\(\{ limit: '2mb' \}\)/, 'app must cap JSON bodies at 2mb');
+  assert.match(dsg, /BEGIN\/COMMIT\/ROLLBACK 保证原子性/, '设计说明书 §3.11(7) must promise transactional writes');
+  assert.match(storageSrc, /this\.db\.exec\('ROLLBACK'\)/, 'storage must roll back failed transactions');
+  assert.match(dsg, /5xx 打印 console\.error；不泄露 token 明文/, '设计说明书 §3.11(8) must doc the 5xx log policy');
+  assert.match(appSrc, /if \(status >= 500\) console\.error\('\[api\]', err\)/, 'app must log only 5xx server errors');
+
+  // ---- 设计说明书 §3.12 安全保密设计（6 条）
+  assert.match(dsg, /RAGDESK_ADMIN_TOKEN（x-admin-token 请求头）保护 \/api\/admin\/\*/, '设计说明书 §3.12(1) must doc the admin token gate');
+  assert.match(appSrc, /app\.use\('\/api\/admin', assertAdmin\)/, 'app must gate the whole admin tree');
+  assert.match(dsg, /RAGDESK_CHAT_TOKEN（Authorization Bearer）保护 \/api\/chat/, '设计说明书 §3.12(1) must doc the chat token gate');
+  assert.match(appSrc, /app\.post\('\/api\/chat', chatAuth/, 'app must gate chat with chatAuth');
+  assert.match(dsg, /RAGDESK_ALLOW_ORIGIN 可限制浮窗跨域来源/, '设计说明书 §3.12(2) must doc CORS restriction');
+  assert.match(dsg, /单文件 ≤50MB、单批 ≤20 个、JSON 体 ≤2MB，防滥用/, '设计说明书 §3.12(3) must doc the upload caps');
+  assert.match(dsg, /默认无任何外部请求；检索与回答仅操作本地 SQLite/, '设计说明书 §3.12(4) must promise no outbound traffic');
+  assert.match(kbSrc, /mode: 'offline-retrieval'/, 'knowledge offline mode must be the default answer');
+  assert.match(dsg, /查询经 toQuery 规范化\/转义为引号词元，避免 FTS 注入/, '设计说明书 §3.12(5) must doc the MATCH sanitization');
+  assert.ok(storageSrc.includes("replace(/[%_]/g, ' ')"), 'storage LIKE degrade must escape % and _');
+  assert.match(dsg, /文档名入库前 path\.basename 归一/, '设计说明书 §3.12(6) must doc basename normalization');
+  assert.match(kbSrc, /filename: path\.basename\(filename\)/, 'knowledge must basename every stored filename');
+  assert.match(dsg, /multer memoryStorage 不落盘/, '设计说明书 §3.12(6) must doc the in-memory upload buffer');
+  assert.match(appSrc, /multer\.memoryStorage\(\)/, 'app must keep uploads in memory only');
 });
 
 test('prod: submission-doc generator guards fail loudly on drift', () => {

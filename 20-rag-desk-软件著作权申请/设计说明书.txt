@@ -316,14 +316,15 @@
     knowledge ↔ storage（方法见 3.3）；knowledge ↔ chunker/tokenizer/
     domains（纯函数）；app ↔ knowledge（answer/ingest/log/stats）。
   3.9.3 嵌入接口
-    <script src="/widget.js" data-api="..." data-domain="..." data-title="...">
-    浮窗内部调用 POST /api/chat，需与 /api/health 能力探测一致。
+    <script src="/widget.js" data-api="..." data-domain="..." data-title="..." data-token="...">
+    浮窗内部调用 POST /api/chat（配置 RAGDESK_CHAT_TOKEN 时带 Bearer 鉴权）。
 
 3.10 数据结构与数据库设计
 --------------------------------------------------------------------------------
   docs：
-    id PK AUTOINCREMENT；filename；kind；mime；size；sha256 UNIQUE 层级查重；
-    status DEFAULT 'ready'；created_at/updated_at DEFAULT datetime('now')。
+    id PK AUTOINCREMENT；filename；kind；mime；size；sha256 内容指纹查重
+    （应用层 getDocBySha 幂等去重，非数据库 UNIQUE）；status DEFAULT 'ready'；
+    created_at/updated_at DEFAULT datetime('now')。
   chunks：
     id PK；doc_id REFERENCES docs(id) ON DELETE CASCADE；chunk_idx；body。
     索引 idx_chunks_doc(doc_id)。
