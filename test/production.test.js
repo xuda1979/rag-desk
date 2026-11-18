@@ -1863,6 +1863,7 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   // stay true to what src/ actually does. Every claim below is pinned to a
   // source needle so an operator following the manual gets the real product.
   const manual = fs.readFileSync(path.join(SUBDIR, '用户手册.txt'), 'utf8');
+  const manualFlat = manual.replace(/\s+/g, ' '); // line-wrapped prose, compare on one line
   const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
   const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
   const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
@@ -1915,6 +1916,30 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.ok(manual.includes('ragdesk-data'), 'manual §2.3 must document the named volume');
   assert.match(dockerfile, /\/api\/health/, 'manual §2.3 healthcheck must exist in Dockerfile');
   assert.match(compose, /\/api\/health/, 'manual §2.3 healthcheck must exist in docker-compose');
+
+  // ---- §2.1 environment bullets: the OS/arch, memory, browser and Docker
+  // Engine requirements are operator-facing; the ones with a code counterpart
+  // are cross-pinned to the built product (node:sqlite, the Docker layout)
+  assert.ok(manual.includes('操作系统：Linux / macOS / Windows（x86-64 或 arm64）'), 'manual §2.1 must list the OS/arch matrix');
+  assert.ok(manual.includes('Node.js ≥ 22.5.0'), 'manual §2.1 must state the Node.js floor');
+  assert.ok(manual.includes('需内置 node:sqlite 模块'), 'manual §2.1 must name the built-in node:sqlite requirement');
+  assert.ok(manualFlat.includes('无需额外编译本地'), 'manual §2.1 must promise no native build for deps');
+  assert.ok(manual.includes('建议 ≥ 2GB（最低 512MB）'), 'manual §2.1 must state the memory recommendation');
+  assert.ok(manual.includes('Chrome / Edge / Firefox / Safari'), 'manual §2.1 must list the supported browsers');
+  assert.ok(manual.includes('Docker Engine 20.10+ 与 Docker Compose'), 'manual §2.1 must require Docker Compose on the Docker path');
+
+  // ---- §2.3 Docker path: the compose build target, multi-stage image and
+  // rebuild-surviving named volume must be the ones docker-compose.yml and
+  // Dockerfile actually ship
+  assert.ok(manual.includes('docker compose up --build'), 'manual §2.3 must document docker compose up --build');
+  assert.match(compose, /^services:\n  ragdesk:\n    build: \./m, 'manual §2.3 the compose service must build from the Dockerfile');
+  assert.ok(manual.includes('镜像多阶段构建（npm ci + 运行）'), 'manual §2.3 must describe the multi-stage image');
+  assert.match(dockerfile, /FROM node:22-bookworm-slim AS build/, 'manual §2.3 build stage must be the Dockerfile dev stage');
+  assert.match(dockerfile, /FROM node:22-bookworm-slim AS runtime/, 'manual §2.3 runtime stage must be the Dockerfile prod stage');
+  assert.match(dockerfile, /AS build\b[\s\S]*?RUN npm ci --no-audit --no-fund/, 'manual §2.3 the build stage must keep plain npm ci (with devDeps)');
+  assert.match(dockerfile, /AS runtime\b[\s\S]*?RUN npm ci --omit=dev/, 'manual §2.3 the runtime stage must install prod deps only');
+  assert.ok(manual.includes('容器重建后数据不丢失'), 'manual §2.3 must promise data survives container rebuild');
+  assert.match(compose, /\nvolumes:\n  ragdesk-data:\s*\n/, 'manual §2.3 the named volume must be declared at compose top level');
 
   // ---- §2.4 first start: auto-seed when the DB was not initialized — the gate
   // named in the manual, the seeded flag it persists, and the demo corpus files
