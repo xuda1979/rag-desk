@@ -2221,6 +2221,22 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.ok(manual.includes('RAGDESK_ALLOW_ORIGIN'), 'manual §5.4 Q12 must name RAGDESK_ALLOW_ORIGIN');
   assert.match(appSrc, /process\.env\.RAGDESK_ALLOW_ORIGIN/, 'manual §5.4 CORS env must be read in app.js');
 
+  // ---- §5.4 Q13: "数据会被上传到云端吗？不会。" — the offline promise must hold
+  // structurally: no src file requires an outbound http(s) client and package.json
+  // ships none; the only way data leaves the machine is a caller-injected external
+  // summarizer (off by default, §4.3), which the manual warns about verbatim.
+  assert.ok(manual.includes('不会。'), 'manual §5.4 Q13 must answer the cloud-upload question in the negative');
+  assert.ok(manual.includes('完全离线'), 'manual §5.4 Q13 must restate the offline guarantee');
+  assert.ok(manual.includes('只读本地 SQLite'), 'manual §5.4 Q13 must name local SQLite as the only store');
+  assert.ok(manual.includes('数据会离开本机'), 'manual §5.4 Q13 must warn that an external summarizer sends data off-machine');
+  assert.ok(manual.includes('外部 summarizer'), 'manual §5.4 Q13 must name the external summarizer as the data-leak path');
+  for (const src of [appSrc, serverSrc, kbSrc, storageSrc, extractSrc]) {
+    assert.ok(!/require\(['"](?:node:)?https?['"]\)/.test(src), 'manual §5.4 Q13 offline promise requires no http(s) client import in src');
+  }
+  assert.ok(!pkg.dependencies['node-fetch'] && !pkg.dependencies.axios && !pkg.dependencies.got, 'manual §5.4 Q13 offline promise requires no HTTP-client dependency');
+  assert.match(kbSrc, /async function mockSummarizer\(\{ query, context \}\)/, 'manual §5.4 Q13 the default summarizer must be the local mock');
+  assert.ok(!/fetch\(/.test(kbSrc), 'manual §5.4 Q13 the default summarizer must make no network calls');
+
   // ---- §5.5 scaling: DELETE route and the widget data-api split both exist
   assert.match(appSrc, /app\.delete\('\/api\/admin\/docs\/:id'/, 'manual §5.5 DELETE-doc flow must be served by app.js');
   assert.ok(manual.includes('data-api'), 'manual §5.5 must document the data-api split');
