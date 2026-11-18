@@ -1708,6 +1708,11 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.match(kbSrc, /llm: false/, 'manual §4.3 LLM-off default must hold in knowledge.js');
   assert.ok(appSrc.includes('llmEnabled: false'), 'manual §4.3 llmEnabled=false must hold in app.js health');
   assert.ok(manual.includes('mockSummarizer'), 'manual §4.3 must document the mock summarizer');
+  // the manual documents the summarizer contract {query, context, systemPrompt}
+  // and says it is caller-injected — both must hold in knowledge.js
+  assert.ok(manual.includes('{ query, context, systemPrompt }'), 'manual §4.3 must document the summarizer argument shape');
+  assert.match(kbSrc, /turns \{query, context, systemPrompt\} into text/, 'manual §4.3 summarizer signature must be documented in knowledge.js');
+  assert.match(kbSrc, /opts\.summarizer \|\| mockSummarizer/, 'manual §4.3 summarizer must be caller-injected in knowledge.js');
 
   // ---- §5.2 Q6: FTS query errors degrade to LIKE scan
   assert.ok(manual.includes('LIKE'), 'manual §5.2 Q6 must document the LIKE 降级 fallback');
@@ -1719,6 +1724,9 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   // ---- §5.3 Q8: empty-file message exists verbatim
   assert.ok(manual.includes('文件内容为空，无法索引'), 'manual §5.3 Q8 must quote the empty-file error');
   assert.match(kbSrc, /文件内容为空，无法索引/, 'the manual-quoted empty-file error must exist in knowledge.js');
+  // ---- §5.3 Q7: the unsupported-format message exists verbatim
+  assert.ok(manual.includes('不支持的文件类型'), 'manual §5.3 Q7 must quote the unsupported-format error');
+  assert.match(kbSrc, /不支持的文件类型/, 'the manual-quoted unsupported-format error must exist in knowledge.js');
   // ---- §5.3 Q9: 400/413 error mapping (fixed from the stale 121/413)
   assert.ok(manual.includes('上传 400/413 错误'), 'manual §5.3 Q9 must document the 400/413 codes');
   assert.match(appSrc, /'LIMIT_FILE_SIZE' \? 413/, '413 must map to file-too-large in app.js');
@@ -1756,6 +1764,10 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.ok(manual.includes('查看该文档分块'), 'manual §5.2 Q4 must promise per-doc chunk inspection');
   assert.ok(adminSrc.includes('查看分块'), 'admin.js must expose the documented 查看分块 action');
   assert.ok(adminSrc.includes('/api/admin/docs/'), 'admin.js must fetch per-doc detail from the docs API');
+  // ---- §5.2 Q4: 中文短查询建议≥2 个汉字 — the tokenizer's default bigram
+  // n-grams (tokenizer.js) make exactly matches impossible for single chars
+  assert.ok(manual.includes('中文短查询建议≥2 个汉字'), 'manual §5.2 Q4 must recommend 2+ Chinese characters');
+  assert.match(tokenizerSrc, /n-grams \(default bigrams\)/, 'manual §5.2 Q4 tokenizer must default to bigram n-grams');
   // ---- §5.2 Q5: the documented fallback sentence exists verbatim
   assert.ok(manual.includes('抱歉，我在知识库中暂未找到与您问题直接相关的内容。'), 'manual §5.2 Q5 must quote the not-found fallback');
   assert.match(domainText, /抱歉，我在知识库中暂未找到/, 'the manual-quoted fallback must exist in a served domain preset');
@@ -1769,6 +1781,8 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.ok(manual.includes('change-me'), 'manual §5.4 Q11 must name the change-me placeholder');
   assert.match(compose, /RAGDESK_ADMIN_TOKEN=change-me/, 'manual §5.4 Q11 compose default must be the change-me placeholder');
   assert.ok(adminSrc.includes("headers['x-admin-token']"), 'manual §5.4 admin must send x-admin-token');
+  assert.ok(manual.includes('unauthorized'), 'manual §5.4 Q11 must name the unauthorized error');
+  assert.match(appSrc, /error: 'unauthorized/, 'manual §5.4 Q11 the unauthorized payload must be served by app.js');
   // ---- §5.4 Q12: RAGDESK_ALLOW_ORIGIN is the CORS control
   assert.ok(manual.includes('RAGDESK_ALLOW_ORIGIN'), 'manual §5.4 Q12 must name RAGDESK_ALLOW_ORIGIN');
   assert.match(appSrc, /process\.env\.RAGDESK_ALLOW_ORIGIN/, 'manual §5.4 CORS env must be read in app.js');
