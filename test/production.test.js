@@ -1970,6 +1970,17 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   }
   assert.match(manual, /法律\/诊所\/招采公告/, 'manual §2.4 must promise the 法律/诊所/招采公告 corpus');
 
+  // ---- §2.4 manual seed reset: RAGDESK_DB relocates the DB and `npm run seed`
+  // re-ingests the demo corpus — the manual's documented reset path. The seed is
+  // sha256-idempotent (skips docs already in storage via getDocBySha) and defaults
+  // to force=false, so re-running it never duplicates or destroys content.
+  const seedSrc = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'seed-fixtures.js'), 'utf8');
+  assert.ok(manual.includes('RAGDESK_DB 改变数据库路径'), 'manual §2.4 must document the RAGDESK_DB path override');
+  assert.ok(manual.includes('npm run seed 手动重置'), 'manual §2.4 must document the npm run seed manual reset');
+  assert.match(pkg.scripts.seed, /scripts\/seed-fixtures\.js/, 'manual §2.4 npm run seed must resolve to scripts/seed-fixtures.js');
+  assert.match(seedSrc, /async function seedIfNeeded\(kb, \{ force = false \}/, 'manual §2.4 the seed must be non-destructive without force');
+  assert.match(seedSrc, /getDocBySha/, 'manual §2.4 the seed must skip docs already in storage (sha256 idempotent)');
+
   // ---- §3.1 demo page: the four preset domains and the three example questions
   for (const q of ['律师咨询费怎么收取？', '挂号需要带什么？', '儿童接种疫苗时间？']) {
     assert.ok(manual.includes(q), `manual §3.1 must list example question ${q}`);
