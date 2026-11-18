@@ -1441,6 +1441,7 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
   const widgetSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'widget.js'), 'utf8');
   const adminSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.js'), 'utf8');
+  const extractSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'extractors.js'), 'utf8');
   const compose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml'), 'utf8');
   const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
@@ -1545,4 +1546,58 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.ok(manual.includes('上传 400/413 错误'), 'manual §5.3 Q9 must document the 400/413 codes');
   assert.match(appSrc, /'LIMIT_FILE_SIZE' \? 413/, '413 must map to file-too-large in app.js');
   assert.match(appSrc, /'LIMIT_UNEXPECTED_FILE' \? 400/, '400 must map to too-many-files in app.js');
+
+  // ---- §2.5 uninstall: dropping data/ragdesk.db clears all state — the whole
+  // store is one SQLite file the server opens directly under the documented path
+  assert.ok(manual.includes('data/ragdesk.db'), 'manual §2.5 must name the sqlite data file');
+  assert.ok(manual.includes('docker compose down -v'), 'manual §2.5 must document the volume-removing teardown');
+  assert.match(compose, /ragdesk-data:\/app\/data/, 'manual §2.5 -v teardown refers to the composed ragdesk-data mount');
+  assert.match(serverSrc, /RAGDESK_DB \|\| path\.join\(ROOT, 'data', 'ragdesk\.db'\)/, 'manual §2.5 single-file DB must be the server default');
+
+  // ---- §4.2 custom domain template: every documented template field must be a
+  // field a served preset actually carries, and must be a valid one-line addition
+  assert.ok(manual.includes('school'), 'manual §4.2 must show the school example');
+  const templateLine = manual.match(/\{ id:'school'.*\}/s);
+  assert.ok(templateLine, 'manual §4.2 must show a whole one-line domain entry');
+  for (const field of ['id', 'label', 'greeting', 'lead', 'fallback', 'footer', 'systemPrompt', 'exampleQuestions']) {
+    assert.ok(templateLine[0].includes(`${field}:`), `manual §4.2 template must document the ${field} field`);
+    assert.ok(DOMAINS.legal[field] !== undefined || (field === 'exampleQuestions' && Array.isArray(DOMAINS.legal[field])), `served preset legal must carry ${field}`);
+  }
+  // the manual promises the demo select and /api/domains pick up new entries
+  assert.match(appSrc, /app\.get\('\/api\/domains'/, 'manual §4.2 /api/domains must be served by app.js');
+  assert.ok(domainText.includes('domainIds()'), 'manual §4.2 auto-discovery must build from domainIds()');
+
+  // ---- §5.1 Q1: node:sqlite is the runtime module — a Node below 22.5 cannot load it
+  assert.ok(manual.includes('node:sqlite'), 'manual §5.1 Q1 must name node:sqlite');
+  assert.match(storageSrc, /require\('node:sqlite'\)/, 'manual §5.1 node:sqlite must be the storage engine import');
+  assert.ok(manual.includes('22.5'), 'manual §5.1 Q1 must give the 22.5 threshold');
+  // ---- §5.1 Q2: PORT override is real
+  assert.ok(manual.includes('PORT=8080 npm start'), 'manual §5.1 Q2 must show the PORT override command');
+  assert.match(serverSrc, /PORT \|\| 3000/, 'manual §5.1 PORT override must feed server.js');
+
+  // ---- §5.2 Q4: the admin shows each doc's chunks so a wrong index is visible
+  assert.ok(manual.includes('查看该文档分块'), 'manual §5.2 Q4 must promise per-doc chunk inspection');
+  assert.ok(adminSrc.includes('查看分块'), 'admin.js must expose the documented 查看分块 action');
+  assert.ok(adminSrc.includes('/api/admin/docs/'), 'admin.js must fetch per-doc detail from the docs API');
+  // ---- §5.2 Q5: the documented fallback sentence exists verbatim
+  assert.ok(manual.includes('抱歉，我在知识库中暂未找到与您问题直接相关的内容。'), 'manual §5.2 Q5 must quote the not-found fallback');
+  assert.match(domainText, /抱歉，我在知识库中暂未找到/, 'the manual-quoted fallback must exist in a served domain preset');
+
+  // ---- §5.3 Q10: PDF parsing is pdf-parse text-layer extraction (scans lack one)
+  assert.ok(manual.includes('文字层'), 'manual §5.3 Q10 must explain the text-layer dependency');
+  assert.match(extractSrc, /require\('pdf-parse'\)/, 'manual §5.3 Q10 pdf-parse must be the PDF extractor');
+  assert.match(extractSrc, /getText\(\)/, 'manual §5.3 Q10 text-layer extraction must use getText()');
+
+  // ---- §5.4 Q11: the admin gate defaults on; compose ships change-me
+  assert.ok(manual.includes('change-me'), 'manual §5.4 Q11 must name the change-me placeholder');
+  assert.match(compose, /RAGDESK_ADMIN_TOKEN=change-me/, 'manual §5.4 Q11 compose default must be the change-me placeholder');
+  assert.ok(adminSrc.includes("headers['x-admin-token']"), 'manual §5.4 admin must send x-admin-token');
+  // ---- §5.4 Q12: RAGDESK_ALLOW_ORIGIN is the CORS control
+  assert.ok(manual.includes('RAGDESK_ALLOW_ORIGIN'), 'manual §5.4 Q12 must name RAGDESK_ALLOW_ORIGIN');
+  assert.match(appSrc, /process\.env\.RAGDESK_ALLOW_ORIGIN/, 'manual §5.4 CORS env must be read in app.js');
+
+  // ---- §5.5 scaling: DELETE route and the widget data-api split both exist
+  assert.match(appSrc, /app\.delete\('\/api\/admin\/docs\/:id'/, 'manual §5.5 DELETE-doc flow must be served by app.js');
+  assert.ok(manual.includes('data-api'), 'manual §5.5 must document the data-api split');
+  assert.ok(manual.includes('一个领域/库'), 'manual §5.5 must recommend per-library instances');
 });
