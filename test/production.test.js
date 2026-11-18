@@ -1106,6 +1106,77 @@ test('prod: README.md documents the exact API, env, limits, response shape and e
   assert.ok(readme.includes('ragdesk-data'), 'README must document the persistent named volume');
 });
 
+test('prod: README.md feature/stack prose matches the implementation (功能/技术栈/自定义领域/目录/许可)', () => {
+  // README.md's opening 功能 bullets, 技术栈 and 自定义领域 sections describe
+  // behavior the code must actually serve (chunker defaults, citation shape,
+  // tokenizer scheme, formats, LLM-off default), and the 目录 table maps each
+  // src file to a purpose. Locking them prevents a README-only rewrite from
+  // outrunning the binary.
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const chunkerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'chunker.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+  const tokenizerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'tokenizer.js'), 'utf8');
+  const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
+  const extractorsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'extractors.js'), 'utf8');
+  const domainsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'domains.js'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+
+  // ---- 功能 bullets
+  assert.ok(readme.includes('自动分块（400 字符窗口，40 字符重叠）'), 'README must document the 400-window / 40-overlap chunker defaults');
+  assert.match(chunkerSrc, /opts\.window \|\| 400/, 'chunker.js must default to a 400-char window as README states');
+  assert.match(chunkerSrc, /opts\.overlap \?\? 40/, 'chunker.js must default to 40-char overlap as README states');
+  assert.ok(readme.includes('SQLite FTS5 + unicode61'), 'README must document FTS5 + unicode61');
+  assert.match(storageSrc, /tokenize='unicode61'/, 'storage.js FTS must use unicode61 as README states');
+  assert.ok(readme.includes('二元切词'), 'README must document the bigram CJK tokenization');
+  assert.match(tokenizerSrc, /overlapping n-grams \(default bigrams\)/, 'tokenizer.js must default to bigram n-grams as README states');
+  assert.ok(readme.includes('BM25 排序'), 'README must document BM25 ranking');
+  assert.match(storageSrc, /bm25\(fts\) AS score/, 'storage.js must rank by bm25(fts) as README states');
+  assert.ok(readme.includes('引用（文档名 + 段落号）'), 'README must document the document-name + paragraph-number citation');
+  assert.match(kbSrc, /document: c\.filename/, 'knowledge.js citations must carry the document name');
+  assert.match(kbSrc, /paragraph: c\.chunkIndex/, 'knowledge.js citations must carry the paragraph number');
+  assert.ok(readme.includes('领域预设（法律 / 医疗 / 招采 / 通用）'), 'README must document the four domain presets');
+  for (const id of ['legal', 'medical', 'procurement', 'general']) {
+    assert.ok(domainsSrc.includes(`${id}:`), `domains.js must serve the ${id} preset README lists`);
+  }
+  assert.ok(readme.includes('可选 LLM 摘要') && readme.includes('默认关闭'), 'README must document the LLM summarizer being off by default');
+  assert.match(kbSrc, /OFF by default/, 'knowledge.js must default the LLM summarizer off as README states');
+
+  // ---- 技术栈
+  assert.ok(readme.includes('node:sqlite'), 'README must document the node:sqlite builtin');
+  assert.match(storageSrc, /require\('node:sqlite'\)/, 'storage.js must import node:sqlite as README states');
+  assert.ok(readme.includes('pdf-parse'), 'README must document pdf-parse');
+  assert.match(extractorsSrc, /require\('pdf-parse'\)/, 'extractors.js must import pdf-parse as README states');
+  assert.ok(readme.includes('fflate'), 'README must document fflate');
+  assert.match(extractorsSrc, /unzipSync/, 'extractors.js must use fflate unzipSync for DOCX as README states');
+  assert.ok(pkg.dependencies.fflate, 'package.json must ship fflate as a runtime dependency');
+  assert.ok(pkg.dependencies['pdf-parse'], 'package.json must ship pdf-parse as a runtime dependency');
+  assert.ok(readme.includes('无构建步骤'), 'README must document the no-build-step frontend');
+  assert.ok(readme.includes('Docker Compose'), 'README must document Docker Compose deployment');
+
+  // ---- 自定义领域
+  assert.ok(readme.includes('src/lib/domains.js'), 'README must point operators at src/lib/domains.js');
+  assert.ok(readme.includes('systemPrompt'), 'README must document the systemPrompt template field');
+  assert.match(domainsSrc, /systemPrompt:/, 'domains.js presets must carry systemPrompt as README states');
+  assert.ok(readme.includes('answerWithLlm'), 'README must document the answerWithLlm injection point');
+  assert.match(kbSrc, /async answerWithLlm\(query, opts = \{\}\)/, 'knowledge.js must expose answerWithLlm({summarizer}) as README states');
+  assert.ok(readme.includes('mock 已内置用于测试'), 'README must mention the built-in mock summarizer');
+  assert.match(kbSrc, /async function mockSummarizer/, 'knowledge.js must ship the mock summarizer as README states');
+
+  // ---- 目录 table: each src file exists and matches its documented purpose
+  const dirTable = readme.match(/^  app\.js\s+#[^\n]+\n^  server\.js\s+#[^\n]+\n^  lib\/knowledge\.js\s+#[^\n]+\n^  lib\/storage\.js\s+#[^\n]+\n^  lib\/tokenizer\.js\s+#[^\n]+\n^  lib\/chunker\.js\s+#[^\n]+\n^  lib\/extractors\.js\s+#[^\n]+\n^  lib\/domains\.js\s+#[^\n]+/m);
+  assert.ok(dirTable, 'README 目录 table must list all eight src files with purposes');
+  assert.ok(readme.includes('fixtures/corpus/    # 中文领域语料（law/clinic/bid'), 'README 目录 must document the Chinese corpus fixtures');
+  assert.ok(readme.includes('npm ci + 运行'), 'README 目录 must describe the Dockerfile as npm ci + run');
+  assert.ok(readme.includes('单服务编排'), 'README 目录 must describe docker-compose.yml as single-service');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'src', 'lib', 'domains.js')), '目录-listed src/lib/domains.js must exist');
+
+  // ---- 许可: README claims MIT, package.json must declare the same license
+  assert.ok(readme.includes('MIT'), 'README must document the MIT license');
+  assert.strictEqual(pkg.license, 'MIT', 'package.json license must be MIT as README states');
+});
+
 test('prod: browser clients (admin.js / demo.js) read exactly the JSON keys the backend actually produces', () => {
   // The admin and demo pages are the third consumer of the API surface, and
   // nothing greps their source: a storage.js rename of `with_answer` /
