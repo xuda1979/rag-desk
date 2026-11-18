@@ -168,17 +168,17 @@
   在任意网页中引入：
 
   <script
-    src="http://<你的服务器>/widget.js"
-    data-api="http://<你的服务器>/api/chat"
+    src="http://localhost:3000/widget.js"
+    data-api="http://localhost:3000/api/chat"
     data-domain="medical"
     data-title="诊所在线咨询"
     data-greeting="您好，我是诊所在线导诊助手。"></script>
 
   页面右下角会出现悬浮聊天按钮，点击展开/收起；用户提问即调用 data-api 指定
   的问答接口。跨域访问由服务器端 RAGDESK_ALLOW_ORIGIN 控制；如设置了
-  RAGDESK_CHAT_TOKEN，请在 script 标签上增加浮窗配置项
-  data-token="<令牌>"，浮窗会自动在请求头携带
-  Authorization: Bearer <令牌>。
+  RAGDESK_CHAT_TOKEN（例如 abc123），请在 script 标签上增加浮窗配置项
+  data-token="abc123"，浮窗会自动在请求头携带
+  Authorization: Bearer abc123。
 
 3.6  HTTP 接口调用示例
 --------------------------------------------------------------------------------
@@ -188,14 +188,14 @@
       curl -X POST http://localhost:3000/api/chat \
         -H "Content-Type: application/json" \
         -d '{"query":"律师咨询费怎么收取？","domain":"legal"}'
-  若设置了聊天令牌，请求头附：Authorization: Bearer <token>。
+  若设置了聊天令牌（如 abc123），请求头附：Authorization: Bearer abc123。
   上传：
       curl -X POST http://localhost:3000/api/admin/upload \
-        -H "x-admin-token: <token>" \
+        -H "x-admin-token: change-me" \
         -F "files=@./fixtures/corpus/clinic-faq.md"
   删除：
       curl -X DELETE http://localhost:3000/api/admin/docs/1 \
-        -H "x-admin-token: <token>"
+        -H "x-admin-token: change-me"
 
 
 ================================================================================

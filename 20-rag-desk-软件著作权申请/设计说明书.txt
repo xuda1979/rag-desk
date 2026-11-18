@@ -316,8 +316,12 @@
     knowledge ↔ storage（方法见 3.3）；knowledge ↔ chunker/tokenizer/
     domains（纯函数）；app ↔ knowledge（answer/ingest/log/stats）。
   3.9.3 嵌入接口
-    <script src="/widget.js" data-api="..." data-domain="..." data-title="..." data-token="...">
-    浮窗内部调用 POST /api/chat（配置 RAGDESK_CHAT_TOKEN 时带 Bearer 鉴权）。
+    <script
+      src="http://localhost:3000/widget.js"
+      data-api="http://localhost:3000/api/chat"
+      data-domain="medical"
+      data-title="诊所在线咨询"></script>
+    浮窗内部调用 POST /api/chat（配置 RAGDESK_CHAT_TOKEN 时自动携带 Bearer 鉴权）。
 
 3.10 数据结构与数据库设计
 --------------------------------------------------------------------------------
