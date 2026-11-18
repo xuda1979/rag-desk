@@ -1866,6 +1866,46 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   assert.match(kbSrc, /opts\.summarizer \|\| mockSummarizer/, '§2.7(3) a caller-supplied summarizer must win over the mock');
   assert.match(kbSrc, /async function mockSummarizer/, '§2.7(3) the built-in default must be the local mock');
 
+  // ---- 设计说明书 §3.1–§3.8 模块设计（每个模块的实质声明必须对应真实实现）
+  // §3.1 chunker：空文本拒绝 / 句界切槽 / 无换行整体回退
+  assert.match(dsg, /去除首尾空白；空文本返回 \[\]./, '设计说明书 §3.1(1) must promise empty-text rejection');
+  assert.match(dsg, /切槽优先落在句号\/问号\/感叹号等句界/, '设计说明书 §3.1(3) must promise sentence-boundary cuts');
+  assert.match(chunkerSrc, /slice\(0, window\)\.search\(\/\[。！？!\?；;\]\/\)/, '§3.1 chunker must cut at [。！？!?；;] sentence boundaries');
+  assert.match(chunkerSrc, /paras\[0\]\.length === src\.length && !src\.includes\('\\n'\)/, '§3.1 no-line-break docs must fall back to whole-text windows');
+  // §3.2 tokenizer：CJK_RE / DELIM_RE / ngrams / stripPageMarkers
+  assert.match(dsg, /CJK_RE\s+：中文字符范围正则/, '设计说明书 §3.2 must keep the CJK_RE definition line');
+  assert.match(dsg, /对汉字连续区生成重叠二元词元/, '设计说明书 §3.2 must promise overlapping bigram n-grams');
+  assert.match(dsg, /去掉 pdf-parse 追加的/, '设计说明书 §3.2 must document stripPageMarkers');
+  assert.match(tokenizerSrc, /const CJK_RE = \/\[\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff\]\//, '§3.2 CJK_RE must match the documented character ranges');
+  assert.match(tokenizerSrc, /const DELIM_RE = \/\[\\s\\p\{P\}\\p\{S\}\\p\{C\}\]\+\/u/, '§3.2 DELIM_RE must split on punctuation/symbols/control');
+  assert.match(tokenizerSrc, /\\d\+\\s\+of\\s\+\\d\+/, '§3.2 stripPageMarkers must strip -- N of M -- page markers');
+  // §3.3 storage：FTS 虚表不可在 JOIN + MATCH 中别名（先查 fts 再补元数据）
+  assert.match(dsg, /FTS 虚表在 JOIN \+ MATCH 下无法安全别名/, '设计说明书 §3.3 must document the no-JOIN-alias caveat');
+  assert.match(storageSrc, /cannot be safely aliased inside a JOIN/, '§3.3 storage comment must carry the no-JOIN-alias caveat');
+  // §3.4 extractors：RFC-4180 / fflate <w:t> / 乱码字符剔除
+  assert.match(dsg, /RFC-4180 风格解析/, '设计说明书 §3.4 must claim the RFC-4180-style CSV parser');
+  assert.match(dsg, /fflate 解压 zip/, '设计说明书 §3.4 must promise fflate zip handling');
+  assert.match(dsg, /剔除乱码字符区/, '设计说明书 §3.4 must promise glyph-hole stripping');
+  assert.match(extractSrc, /RFC-4180/, '§3.4 parseCsv must stay RFC-4180-style');
+  assert.match(extractSrc, /<w:t\(\?:\\s\[\^>\]\*\)\?>\(\[\\s\\S\]\*\?\)<\\\/w:t>/, '§3.4 extractDocx must pull <w:t> run texts');
+  assert.match(extractSrc, /\\u0000\\uFFFD/, '§3.4 extractPdf must strip glyph holes');
+  // §3.5 domains：四领域预设 + getDomain 未命中回退 general
+  assert.match(dsg, /DOMAINS = \{ legal, medical, procurement, general \}/, '设计说明书 §3.5 must name the four preset domains');
+  assert.match(dsg, /getDomain\(id\) 未命中回退 general/, '设计说明书 §3.5 must promise the general fallback');
+  assert.match(domSrc, /DOMAINS\[id\] \|\| DOMAINS\.general/, '§3.5 getDomain must fall back to general on a miss');
+  assert.match(domSrc, /function getDomain\(id\)/, '§3.5 must implement getDomain');
+  // §3.6 knowledge：摘录宽度 160 + engineInfo 能力上报
+  assert.match(dsg, /excerptFrom\(body, query, width=160\)/, '设计说明书 §3.6 must document the 160-char excerpt width');
+  assert.match(dsg, /对外上报检索能力（fts\/bm25\/embedding=false\/llm=false）/, '设计说明书 §3.6 must document engineInfo capabilities');
+  assert.match(kbSrc, /excerptFrom\(chunkBody, query, width = 160\)/, '§3.6 excerptFrom default width must be 160');
+  assert.match(kbSrc, /embedding: false,[\s\S]*?llm: false/, '§3.6 engineInfo must report embedding=false llm=false');
+  // §3.7 app：表单中间件与统一错误处理（5xx 日志已在 §3.11(8) 锁定）
+  assert.match(dsg, /express\.json\(\{limit:'2mb'\}\) \/ urlencoded/, '设计说明书 §3.7 must document the body/form middleware');
+  assert.match(appSrc, /express\.urlencoded\(\{ extended: false \}\)/, '§3.7 app must mount the urlencoded middleware');
+  // §3.8 server：SIGINT/SIGTERM 优雅退出（SIGINT 处理器已在 manual §2.5 锁定）
+  assert.match(dsg, /SIGINT\/SIGTERM 优雅退出/, '设计说明书 §3.8 must promise graceful shutdown');
+  assert.match(serverSrc, /process\.on\('SIGTERM', close\)/, '§3.8 server must also bind SIGTERM to close');
+
   // ---- 登记表 §三 开发及运行环境：language/runtime/module-system claims must
   // match package.json + storage.js exactly
   assert.strictEqual(pkg.type, 'commonjs', '登记表 §三 CommonJS 模块规范 must equal pkg.type');
