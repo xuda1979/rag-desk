@@ -1308,6 +1308,23 @@ test('prod: package.json scripts, engines, main and deps stay consistent with th
   }
   assert.match(pkg.scripts.seed, /scripts\/seed-fixtures\.js/, 'seed script must run scripts/seed-fixtures.js');
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'scripts', 'seed-fixtures.js')), 'seed entrypoint must exist');
+
+  // ---- 快速开始 seed target: README tells operators `npm run seed` generates
+  // the domain corpus (fixtures/corpus) and writes it into data/ragdesk.db —
+  // the seeder's two target paths must stay exactly those, or the quick-start
+  // lies about where the demo data lands.
+  const seedSrc = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'seed-fixtures.js'), 'utf8');
+  assert.match(readme, /npm run seed\s+# 生成并把领域语料（fixtures\/corpus）写入 data\/ragdesk\.db/,
+    'README 快速开始 must show seed writing fixtures/corpus into data/ragdesk.db');
+  assert.match(seedSrc, /FIXTURES = path\.join\(ROOT, 'fixtures', 'corpus'\)/,
+    'seed-fixtures.js must target fixtures/corpus as the README quick-start states');
+  assert.match(seedSrc, /dbPath = path\.join\(ROOT, 'data', 'ragdesk\.db'\)/,
+    'seed-fixtures.js must write data/ragdesk.db as the README quick-start states');
+  assert.match(seedSrc, /fs\.mkdirSync\(path\.dirname\(dbPath\), \{ recursive: true \}\)/,
+    'seed-fixtures.js must create the DB parent dir so the data/ target works from a clean checkout');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'fixtures', 'corpus')), 'the quick-start corpus dir must exist');
+  assert.ok(fs.readdirSync(path.join(__dirname, '..', 'fixtures', 'corpus')).length > 0,
+    'the quick-start corpus dir must hold the generated fixtures');
   assert.match(pkg.scripts.test, /--test/, 'test script must use the node test runner');
   assert.match(pkg.scripts.test, /test\/\*\.test\.js/, 'test script must match test/*.test.js as the suite layout');
 
