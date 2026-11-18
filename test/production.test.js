@@ -1450,6 +1450,7 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   // a source needle so a submission reviewer reading the docs gets the truth.
   const reg = fs.readFileSync(path.join(SUBDIR, '软件著作权登记表.txt'), 'utf8');
   const dsg = fs.readFileSync(path.join(SUBDIR, '设计说明书.txt'), 'utf8');
+  const manual = fs.readFileSync(path.join(SUBDIR, '用户手册.txt'), 'utf8');
   const chunkerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'chunker.js'), 'utf8');
   const tokenizerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'tokenizer.js'), 'utf8');
   const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
@@ -1737,6 +1738,8 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   assert.match(pkg.dependencies.express, /\^4\./, '§1.4 must stay on Express 4 as cited');
   assert.ok(pkg.dependencies.multer, '§1.4 multer must remain a runtime dependency');
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'SPEC.md')), '§1.4 must cite a real SPEC.md');
+  assert.match(dsg, /本项目 README\.md 与 SPEC\.md/, '§1.4 must cite both README.md and SPEC.md');
+  assert.ok(readmeSrc.includes('RAG-Desk'), 'the §1.4-cited README.md must stay the RAG-Desk project readme');
 
   // ---- 设计说明书 §2.5 功能需求与程序的关系（FR1-FR7 模块归属）
   for (const row of [
@@ -1762,6 +1765,38 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   // ---- 设计说明书 §2.7 尚未解决的问题（负向断言：单实例、无分布式、无多租户）
   assert.ok(!(/tenant|多租户/i.test(appSrc + storageSrc)), '§2.7(1) no multi-tenant isolation may exist');
   assert.ok(!/cluster/.test(serverSrc), '§2.7(2) server must not cluster (single-node as documented)');
+
+  // ---- 登记表 §三 开发及运行环境：language/runtime/module-system claims must
+  // match package.json + storage.js exactly
+  assert.strictEqual(pkg.type, 'commonjs', '登记表 §三 CommonJS 模块规范 must equal pkg.type');
+  assert.strictEqual(pkg.engines.node, '>=22.5.0', '登记表 §三 Node ≥ 22.5.0 must equal the engines floor');
+  assert.match(storageSrc, /node:sqlite/, '登记表 §三 内置 node:sqlite must be the storage engine import');
+  assert.match(storageSrc, /tokenize='unicode61'/, '登记表 §三 FTS5 全文检索扩展 must tokenize with unicode61');
+  assert.ok(Object.keys(pkg.dependencies).includes('express') && Object.keys(pkg.dependencies).includes('multer') && Object.keys(pkg.dependencies).includes('fflate') && Object.keys(pkg.dependencies).includes('pdf-parse'),
+    '登记表 §三 must list exactly the runtime deps the package.json ships');
+  assert.strictEqual(Object.keys(pkg.dependencies).length, 4, '登记表 §三 must stay at the four shipped runtime deps');
+  assert.match(reg, /完全离线运行，数据不出机器/, '登记表 §三 must promise fully-offline data confinement');
+  assert.ok(
+    !(/(?:fetch\(|https\.request|http\.request|net\.connect)/.test(appSrc + serverSrc)),
+    '登记表 §三 offline: no source module may make outbound network calls'
+  );
+
+  // ---- 登记表 §七 递交材料清单：every submitted file must exist and be non-empty
+  for (const f of ['软件著作权登记表.txt', '源代码.txt', '设计说明书.txt', '用户手册.txt']) {
+    const p = path.join(SUBDIR, f);
+    assert.ok(fs.existsSync(p), `登记表 §七 must have a real ${f}`);
+    assert.ok(fs.statSync(p).size > 0, `登记表 §七 ${f} must not be an empty placeholder`);
+  }
+
+  // ---- 用户手册 §5.4 Q13: the cloud-upload answer must match the offline-only
+  // implementation (no outbound fetch in any app/knowledge/storage code path)
+  assert.ok(manual.includes('数据会被上传到云端吗'), 'manual §5.4 Q13 must pose the cloud-upload question');
+  assert.ok(manual.includes('不会。默认路径完全离线'), 'manual §5.4 Q13 must answer 不会 on the default path');
+  assert.ok(appSrc.includes('llmEnabled: false'), 'manual §5.4 Q13 summarizer-off default must hold in app.js');
+  assert.ok(
+    !(/(?:fetch\(|https\.request|http\.request)/.test(kbSrc + storageSrc)),
+    'manual §5.4 Q13 default path must make no outbound HTTP calls'
+  );
 });
 
 test('prod: submission-doc generator guards fail loudly on drift', () => {
