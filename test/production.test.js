@@ -1460,6 +1460,7 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
   const widgetSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'widget.js'), 'utf8');
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const readmeSrc = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
   const { DOMAINS } = require('../src/lib/domains');
   const { fileKind } = require('../src/lib/extractors');
 
@@ -1723,6 +1724,44 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   assert.match(kbSrc, /filename: path\.basename\(filename\)/, 'knowledge must basename every stored filename');
   assert.match(dsg, /multer memoryStorage 不落盘/, '设计说明书 §3.12(6) must doc the in-memory upload buffer');
   assert.match(appSrc, /multer\.memoryStorage\(\)/, 'app must keep uploads in memory only');
+
+  // ---- 设计说明书 §1.2 项目背景 / §1.4 参考资料（§1.3 术语已由上文 FTS5/bigram/BM25/分块 needles 覆盖）
+  assert.match(dsg, /不依赖任何外部大模型或向量数据库/, '设计说明书 §1.2 must promise no external models/vector DB');
+  assert.ok(
+    !(/(?:fetch\(|https\.request|http\.request)/.test(kbSrc + storageSrc)),
+    '§1.2 offline promise: knowledge/storage must make no outbound HTTP calls'
+  );
+  assert.match(dsg, /软件全称：RAG-Desk 垂直行业知识库问答系统/, '设计说明书 §1.2 must state the full product name');
+  assert.strictEqual(pkg.name, 'rag-desk', 'pkg.name must match the 软件简称 RAG-Desk');
+  assert.strictEqual(pkg.version, '1.0.0', 'pkg.version must match the 版本 V1.0');
+  assert.match(pkg.dependencies.express, /\^4\./, '§1.4 must stay on Express 4 as cited');
+  assert.ok(pkg.dependencies.multer, '§1.4 multer must remain a runtime dependency');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'SPEC.md')), '§1.4 must cite a real SPEC.md');
+
+  // ---- 设计说明书 §2.5 功能需求与程序的关系（FR1-FR7 模块归属）
+  for (const row of [
+    'FR1 知识摄入与去重 knowledge.js + extractors.js + chunker.js + storage.js',
+    'FR2 中文检索与 BM25 排序 tokenizer.js + storage.js',
+    'FR3 离线问答与引用 knowledge.js + domains.js',
+    'FR4 领域模板 domains.js',
+    'FR5 管理后台 app.js + public/admin.',
+    'FR6 嵌入浮窗 app.js + public/widget.js',
+    'FR7 查询日志与统计 storage.js + app.js',
+  ]) {
+    assert.ok(dsgFlat.includes(row), `设计说明书 §2.5 must map '${row}' to its modules`);
+  }
+  assert.match(kbSrc, /require\('\.\/chunker'\)/, 'FR1 knowledge must own chunking via chunker');
+  assert.match(kbSrc, /require\('\.\/extractors'\)/, 'FR1 knowledge must own extraction via extractors');
+  assert.match(kbSrc, /require\('\.\/domains'\)/, 'FR3 knowledge must own offline answers via domains presets');
+  assert.match(storageSrc, /require\('\.\/tokenizer'\)/, 'FR2 storage must own retrieval via tokenizer');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'public', 'admin.js')), 'FR5 admin pair must include public/admin.js');
+
+  // ---- 设计说明书 §2.6 人工处理过程（部署节点已由 §2.2 锁定；此处锁定维护流程）
+  assert.match(dsg, /维护期通过管理后台增删文档/, '设计说明书 §2.6 must document admin CRUD as the maintenance path');
+
+  // ---- 设计说明书 §2.7 尚未解决的问题（负向断言：单实例、无分布式、无多租户）
+  assert.ok(!(/tenant|多租户/i.test(appSrc + storageSrc)), '§2.7(1) no multi-tenant isolation may exist');
+  assert.ok(!/cluster/.test(serverSrc), '§2.7(2) server must not cluster (single-node as documented)');
 });
 
 test('prod: submission-doc generator guards fail loudly on drift', () => {
