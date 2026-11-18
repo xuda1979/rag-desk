@@ -1525,6 +1525,28 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
     assert.ok(doc.includes('许达（中国移动研究院）'), '源代码/设计说明书/用户手册 must carry 许达（中国移动研究院）');
   }
 
+  // ---- 登记表 §一 软件基本信息：登记表独占字段 + 跨文件身份一致性
+  // 软件全称/版本/完成日期/开发方式/未发表 分散在 4 份文件里，任意一处与其它
+  // 文件或 package.json 不一致都是登记审查可见的漂移；登记表 §一 的字段不受
+  // 生成器修补（仅 §三/§六 计数行被 patchRegister 改写），须手动钉住。
+  assert.match(reg, /软件全称\s*：RAG-Desk 垂直行业知识库问答系统/, '登记表 §一 must state the full product name');
+  assert.match(reg, /软件简称\s*：RAG-Desk/, '登记表 §一 must state the short name RAG-Desk');
+  assert.match(reg, /软件分类\s*：应用软件 —— 信息检索 \/ 智能问答/, '登记表 §一 must classify as 应用软件（信息检索/智能问答）');
+  assert.match(reg, /版本号\s*：V1\.0/, '登记表 §一 version must be V1.0');
+  assert.match(reg, /开发完成日期\s*：2026-11-16/, '登记表 §一 must state 开发完成日期 2026-11-16');
+  assert.match(reg, /首次发表日期\s*：未发表/, '登记表 §一 must state 首次发表日期 未发表');
+  assert.match(reg, /开发方式\s*：独立开发/, '登记表 §一 must state 开发方式 独立开发');
+  assert.match(reg, /著作权人地址\s*：中国/, '登记表 §一 must keep 著作权人地址 中国');
+  assert.match(reg, /登记机构\s*：中国版权保护中心/, '登记表 §一 must name 登记机构 中国版权保护中心');
+  // 跨文件一致性：全称/版本/完成日期/开发方式 必须与 源代码页眉、设计说明书
+  // §1.2、用户手册页眉 完全一致（版本连 package.json 的 1.0.0，见 §1.2 段）。
+  assert.match(srcDoc, /软件名称：RAG-Desk 垂直行业知识库问答系统/, '源代码 header must carry the same full product name');
+  assert.match(srcDoc, /版本号\s*：V1\.0/, '源代码 header must carry V1.0');
+  assert.match(dsg, /RAG-Desk 垂直行业知识库问答系统 V1\.0/, '设计说明书 title must carry V1.0');
+  assert.match(dsg, /软件简称：RAG-Desk；软件全称：RAG-Desk 垂直行业知识库问答系统/, '设计说明书 §1.2 must pair 简称/全称 identically to 登记表');
+  assert.match(dsg, /版本：V1\.0；开发完成日期：2026-11-16；开发方式：独立开发/, '设计说明书 §1.2 identity line must fix version/date/开发方式 with 登记表');
+  assert.match(manual, /RAG-Desk 垂直行业知识库问答系统 V1\.0/, '用户手册 title must carry V1.0');
+
   // ---- 四、主要功能
   // 1. intake formats (Markdown/纯文本/PDF/DOCX/CSV FAQ) must be the real fileKind set
   assert.match(reg, /Markdown、纯文本、PDF、DOCX、CSV/, '登记表 §四.1 must list the intake formats');
