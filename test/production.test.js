@@ -2130,6 +2130,14 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   // ---- §5.2 Q6: FTS query errors degrade to LIKE scan
   assert.ok(manual.includes('LIKE'), 'manual §5.2 Q6 must document the LIKE 降级 fallback');
   assert.match(storageSrc, /body LIKE \? COLLATE NOCASE/, 'manual LIKE 降级 must have a LIKE fallback in storage.js');
+  // the degrade is AUTOMATIC: storage.js catches the FTS MATCH error and reruns
+  // the query as a LIKE scan — the user does nothing; the special-symbol input
+  // the manual names as the trigger is the FTS syntax error the catch documents
+  assert.ok(manual.includes('自动降级'), 'manual §5.2 Q6 must promise the automatic LIKE degrade');
+  assert.ok(manual.includes('含特殊符号'), 'manual §5.2 Q6 must name special-symbol input as the trigger');
+  assert.match(storageSrc, /query syntax errors/, 'manual §5.2 Q6 trigger must be the FTS syntax-error catch in storage.js');
+  assert.match(storageSrc, /degrade to LIKE scan/, 'manual §5.2 Q6 must document the catch-arm degrade comment');
+  assert.match(storageSrc, /\[%_\]/, 'manual §5.2 Q6 degrade must strip LIKE wildcards from the query');
 
   // ---- §5.3 Q7 formats: .markdown documented and served
   assert.ok(manual.includes('.markdown'), 'manual §5.3 Q7 must list .markdown');
