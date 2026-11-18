@@ -2038,8 +2038,17 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.match(manual, /删除后相关\s*引用即不再命中/, 'manual §3.3 must promise citations stop matching after delete');
 
   // ---- §3.4 stats: total / with_answer / 命中率 served by the storage query
+  assert.ok(manual.includes('总查询量'), 'manual §3.4 must document the total-query stat');
+  assert.match(storageSrc, /COUNT\(\*\) AS total/, 'manual 总查询量 must be a COUNT over queries_log in storage.js');
   assert.ok(manual.includes('with_answer'), 'manual §3.4 must document the with_answer stat');
   assert.match(storageSrc, /AS with_answer/, 'manual with_answer stat must exist in storage.js stats');
+  assert.match(storageSrc, /matched > 0/, 'with_answer must count only queries that hit at least one citation');
+  assert.ok(manual.includes('命中率'), 'manual §3.4 must document the hit rate');
+  assert.match(adminSrc, /Math\.round\(\(s\.with_answer \/ s\.total\) \* 100\)/, 'admin.js must derive the hit rate from total and with_answer');
+  // the analytics sentence (哪些问题高发 / 哪些文档检索命中之高) is exactly what
+  // the persisted query text plus its top-matched document enable
+  assert.ok(manual.includes('哪些问题高发'), 'manual §3.4 must promise question-frequency analytics');
+  assert.ok(manual.includes('据此补充语料'), 'manual §3.4 must promise corpus-supplement guidance');
 
   // ---- §3.4 log fields: the recent-query columns the manual lists (问题、时间、
   // 命中数、来源文档) must be the columns admin.html renders and admin.js fills
