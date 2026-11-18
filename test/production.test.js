@@ -2197,4 +2197,9 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.match(appSrc, /app\.delete\('\/api\/admin\/docs\/:id'/, 'manual §5.5 DELETE-doc flow must be served by app.js');
   assert.ok(manual.includes('data-api'), 'manual §5.5 must document the data-api split');
   assert.ok(manual.includes('一个领域/库'), 'manual §5.5 must recommend per-library instances');
+  // the chunk-total control the manual recommends (prune stale docs, re-upload)
+  // must be observable: admin.js renders the summed chunk_count as the 分块 stat
+  assert.ok(manual.includes('控制分块总量'), 'manual §5.5 must recommend controlling the chunk total');
+  assert.ok(manual.includes('重新上传'), 'manual §5.5 must recommend re-uploading after pruning');
+  assert.match(adminSrc, /docs\.reduce\(\(s, d\) => s \+ \(d\.chunk_count \|\| 0\), 0\)/, 'manual §5.5 the 分块 total stat must come from summed chunk_count in admin.js');
 });
