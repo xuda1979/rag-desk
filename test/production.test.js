@@ -1167,7 +1167,14 @@ test('prod: README.md feature/stack prose matches the implementation (功能/技
   // ---- 目录 table: each src file exists and matches its documented purpose
   const dirTable = readme.match(/^  app\.js\s+#[^\n]+\n^  server\.js\s+#[^\n]+\n^  lib\/knowledge\.js\s+#[^\n]+\n^  lib\/storage\.js\s+#[^\n]+\n^  lib\/tokenizer\.js\s+#[^\n]+\n^  lib\/chunker\.js\s+#[^\n]+\n^  lib\/extractors\.js\s+#[^\n]+\n^  lib\/domains\.js\s+#[^\n]+/m);
   assert.ok(dirTable, 'README 目录 table must list all eight src files with purposes');
-  assert.ok(readme.includes('fixtures/corpus/    # 中文领域语料（law/clinic/bid'), 'README 目录 must document the Chinese corpus fixtures');
+  assert.ok(readme.includes('fixtures/corpus/    # 中文领域语料（law/clinic/bid + pdf/docx/csv/txt）'),
+    'README 目录 must document the Chinese corpus fixtures with the full format mix');
+  assert.ok(readme.includes('public/             # 演示页 / admin / widget.js'),
+    'README 目录 must document the public/ demo pages and widget');
+  assert.ok(readme.includes('scripts/            # 种子与 fixtures 生成'),
+    'README 目录 must document the scripts/ seed and fixture generators');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'public')), '目录-listed public/ dir must exist');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'scripts')), '目录-listed scripts/ dir must exist');
   assert.ok(readme.includes('npm ci + 运行'), 'README 目录 must describe the Dockerfile as npm ci + run');
   assert.ok(readme.includes('单服务编排'), 'README 目录 must describe docker-compose.yml as single-service');
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'src', 'lib', 'domains.js')), '目录-listed src/lib/domains.js must exist');
