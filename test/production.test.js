@@ -1915,6 +1915,13 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.match(serverSrc, /PORT \|\| 3000/, 'manual §2.2 default port 3000 must match server.js');
   assert.ok(manual.includes('npm run seed'), 'manual §2.2 must document npm run seed');
   assert.ok(manual.includes('npm start'), 'manual §2.2 must document npm start');
+  // the §2.2 step list is the operator install contract: the version check must
+  // name the node --version probe and the floor package.json engines enforces
+  assert.ok(manual.includes('node --version'), 'manual §2.2 step 1 must show the node --version probe');
+  assert.ok(manual.includes('应 ≥ v22.5.0'), 'manual §2.2 must state the Node floor in the version check');
+  assert.strictEqual(pkg.engines.node, '>=22.5.0', 'manual §2.2 version-check floor must equal package.json engines');
+  assert.ok(manual.includes('cd 20-rag-desk'), 'manual §2.2 step 2 must show entering the project directory');
+  assert.ok(manual.includes('npm install'), 'manual §2.2 step 2 must document npm install');
   // the manual's 控制台会打印访问地址 promise: server.js logs the running
   // banner with the actual PORT inside the app.listen callback, naming admin
   // and demo URLs as the manual says
@@ -2142,6 +2149,12 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   // store is one SQLite file the server opens directly under the documented path
   assert.ok(manual.includes('data/ragdesk.db'), 'manual §2.5 must name the sqlite data file');
   assert.ok(manual.includes('docker compose down -v'), 'manual §2.5 must document the volume-removing teardown');
+  assert.ok(manual.includes('停掉进程（Ctrl+C 或 kill）'), 'manual §2.5 must describe stopping the source process');
+  assert.match(serverSrc, /process\.on\('SIGINT', close\)/, 'manual §2.5 Ctrl+C teardown must bound to the SIGINT handler in server.js');
+  assert.match(serverSrc, /process\.on\('SIGTERM', close\)/, 'manual §2.5 kill teardown must bound to the SIGTERM handler in server.js');
+  assert.ok(manual.includes('一并删除即清除全部索引与日志'), 'manual §2.5 must promise one-file index+log cleanup');
+  assert.match(storageSrc, /new DatabaseSync\(dbPath\)/, 'manual §2.5 single-file cleanup requires one sqlite handle in storage.js');
+  assert.match(storageSrc, /CREATE TABLE IF NOT EXISTS queries_log/, 'manual §2.5 the query log must live in the same sqlite file');
   assert.match(compose, /ragdesk-data:\/app\/data/, 'manual §2.5 -v teardown refers to the composed ragdesk-data mount');
   assert.match(serverSrc, /RAGDESK_DB \|\| path\.join\(ROOT, 'data', 'ragdesk\.db'\)/, 'manual §2.5 single-file DB must be the server default');
 
