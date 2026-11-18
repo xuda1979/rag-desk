@@ -1172,9 +1172,12 @@ test('prod: README.md feature/stack prose matches the implementation (功能/技
   assert.ok(readme.includes('单服务编排'), 'README 目录 must describe docker-compose.yml as single-service');
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'src', 'lib', 'domains.js')), '目录-listed src/lib/domains.js must exist');
 
-  // ---- 许可: README claims MIT, package.json must declare the same license
-  assert.ok(readme.includes('MIT'), 'README must document the MIT license');
-  assert.strictEqual(pkg.license, 'MIT', 'package.json license must be MIT as README states');
+  // ---- 许可: AGPL-3.0 + 商业授权 dual license, README and package.json must agree
+  assert.ok(readme.includes('AGPL-3.0'), 'README must document the AGPL-3.0 open-source license');
+  assert.ok(readme.includes('商业授权'), 'README must document the commercial-authorization model');
+  assert.strictEqual(pkg.license, 'AGPL-3.0-only', 'package.json license must be AGPL-3.0-only as README states');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'LICENSE')), 'AGPL-3.0 license text must live at project root LICENSE');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'COMMERCIAL-LICENSE.md')), 'commercial authorization terms must live at COMMERCIAL-LICENSE.md');
 });
 
 test('prod: browser clients (admin.js / demo.js) read exactly the JSON keys the backend actually produces', () => {
