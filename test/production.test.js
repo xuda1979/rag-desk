@@ -2116,6 +2116,13 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   }
   assert.match(serverSrc, /RAGDESK_DB \|\| path\.join\(ROOT, 'data', 'ragdesk\.db'\)/, 'manual §4.1 default DB path must match server.js');
 
+  // ---- §4.1 launch examples: bash and PowerShell override PORT + RAGDESK_DB
+  // the same two vars the env table documents and server.js reads
+  assert.ok(manual.includes('PORT=8080 RAGDESK_DB=/var/lib/ragdesk.db npm start'), 'manual §4.1 Linux example must combine PORT+RAGDESK_DB on npm start');
+  assert.ok(manual.includes('$env:PORT=8080'), 'manual §4.1 must show the Windows PowerShell PORT set');
+  assert.ok(manual.includes('$env:RAGDESK_DB'), 'manual §4.1 must show the Windows PowerShell RAGDESK_DB set');
+  assert.ok(manual.includes('D:\\data\\ragdesk.db'), 'manual §4.1 Windows example must use a Windows-style DB path');
+
   // ---- §4.3 optional LLM: off by default, injected summarizer opt-in
   assert.match(kbSrc, /mode: 'offline-retrieval'/, 'manual §4.3 offline default must exist in knowledge.js');
   assert.match(kbSrc, /llm: false/, 'manual §4.3 LLM-off default must hold in knowledge.js');
