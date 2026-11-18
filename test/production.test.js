@@ -1522,10 +1522,33 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const demoJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'demo.js'), 'utf8');
   const adminHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.html'), 'utf8');
+  const tokenizerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'tokenizer.js'), 'utf8');
 
   // ---- §2.1 runtime: manual requires Node >= 22.5.0 = package.json engines
   assert.match(manual, /Node\.js ≥ 22\.5\.0/, 'manual §2.1 must state the Node requirement');
   assert.ok(pkg.engines && />=22\.5\.0/.test(pkg.engines.node), 'package.json engines must match the manual Node requirement');
+
+  // ---- §1.2 feature list: every 主要特点 bullet maps to a real implementation
+  // path (offline / CJK tokenizer+BM25 / citations / widget script / embedded SQLite)
+  assert.ok(manual.includes('完全离线'), 'manual §1.2 must lead with the offline property');
+  assert.ok(manual.includes('默认不依赖任何外部大模型或向量数据库'), 'manual §1.2 must promise no external model/vector DB');
+  assert.ok(manual.includes('数据不出机器'), 'manual §1.2 must promise data stays on the machine');
+  assert.match(kbSrc, /mode: 'offline-retrieval'/, 'manual §1.2 offline-only must hold in knowledge.js');
+  assert.ok(manual.includes('中文友好'), 'manual §1.2 must claim Chinese-friendly retrieval');
+  assert.match(tokenizerSrc, /default bigrams/, 'manual §1.2 CJK-friendly tokenizer must n-gram runs in tokenizer.js');
+  assert.match(storageSrc, /bm25\(fts\)/, 'manual §1.2 relevance ranking must use BM25 in storage.js');
+  assert.ok(manual.includes('可溯源'), 'manual §1.2 must claim traceable citations');
+  assert.match(kbSrc, /document: c\.filename/, 'manual §1.2 citations must carry the document name from knowledge.js');
+  assert.match(kbSrc, /paragraph: c\.chunkIndex/, 'manual §1.2 citations must carry the paragraph number from knowledge.js');
+  assert.match(kbSrc, /excerptFrom\(/, 'manual §1.2 citations must extract the original excerpt in knowledge.js');
+  assert.ok(manual.includes('易嵌入'), 'manual §1.2 must claim easy embedding');
+  assert.match(appSrc, /app\.get\('\/widget\.js'/, 'manual §1.2 widget script must be served by app.js');
+  assert.match(appSrc, /res\.type\('application\/javascript'\)/, 'manual §1.2 widget.js must be served as JS');
+  assert.ok(manual.includes('轻量化'), 'manual §1.2 must claim lightweight operation');
+  assert.ok(manual.includes('单进程运行'), 'manual §1.2 must promise single-process runtime');
+  assert.match(serverSrc, /app\.listen\(PORT/, 'manual §1.2 single process must be the one server listen');
+  assert.ok(manual.includes('无独立数据库服务'), 'manual §1.2 must promise no separate DB service');
+  assert.match(storageSrc, /require\('node:sqlite'\)/, 'manual §1.2 embedded DB must be node:sqlite in storage.js');
 
   // ---- §2.2/§2.3 install: default port 3000, docker volume + healthcheck
   assert.match(serverSrc, /PORT \|\| 3000/, 'manual §2.2 default port 3000 must match server.js');
@@ -1585,6 +1608,12 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   // the doc list column the manual describes must be the one admin.html renders
   assert.ok(manual.includes('上传时间'), 'manual §3.2 doc list must label the upload timestamp');
   assert.match(adminHtml, /上传时间/, 'manual §3.2 上传时间 column must exist in admin.html');
+  // the 上传区/查询统计卡片 the manual promises must be the cards admin.html renders
+  assert.ok(manual.includes('顶部提供上传区与查询统计卡片'), 'manual §3.2 must promise the upload area and stats cards');
+  assert.match(adminHtml, /<h2>上传文档<\/h2>/, 'manual §3.2 upload card must exist in admin.html');
+  assert.match(adminHtml, /<h2>索引状态<\/h2>/, 'manual §3.2 stats card must exist in admin.html');
+  // the picker accept list the manual gives must be the file input's accept string
+  assert.match(adminHtml, /accept="\.md,\.markdown,\.pdf,\.docx,\.txt,\.csv"/, 'manual §3.2 multi-select formats must match the admin upload input');
 
   // ---- §3.3 upload: formats, 50MB, 20-per-batch, indexed/duplicate/error results
   assert.ok(manual.includes('50MB'), 'manual §3.3 must cap files at 50MB');
@@ -1633,6 +1662,16 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.ok(manual.includes('Authorization: Bearer'), 'manual §3.5 must document the Bearer header');
   assert.match(widgetSrc, /headers\.Authorization = 'Bearer ' \+ TOKEN/, 'widget.js must send the Bearer token as documented');
   assert.ok(manual.includes('RAGDESK_ALLOW_ORIGIN'), 'manual §3.5 must document RAGDESK_ALLOW_ORIGIN CORS control');
+  // the manual prose promises a floating button that toggles a panel and posts
+  // questions to the data-api endpoint — widget.js must implement each step
+  assert.ok(manual.includes('页面右下角会出现悬浮聊天按钮'), 'manual §3.5 must promise the bottom-right floating button');
+  assert.match(widgetSrc, /fab\.id = 'ragdesk-fab'/, 'widget.js must create the documented floating button');
+  assert.match(widgetSrc, /right:20px;bottom:20px/, 'manual §3.5 floating button must sit bottom-right');
+  assert.ok(manual.includes('点击展开/收起'), 'manual §3.5 must promise click-to-toggle the panel');
+  assert.match(widgetSrc, /panel\.classList\.toggle\('open'\)/, 'widget.js must toggle the panel on fab click');
+  assert.match(manual, /调用 data-api 指定\s*的问答接口/, 'manual §3.5 must promise posting to the data-api endpoint');
+  assert.match(widgetSrc, /fetch\(API, \{/, 'widget.js must fetch the data-api endpoint');
+  assert.match(widgetSrc, /method: 'POST'/, 'widget.js must POST to the data-api endpoint');
 
   // ---- §3.6 HTTP interface examples: each curl the manual shows must hit a
   // route app.js actually serves, with the documented method, path and headers
