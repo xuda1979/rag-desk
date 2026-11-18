@@ -1442,6 +1442,119 @@ test('prod: submission docs byte-match fresh generation from the current source'
   );
 });
 
+test('prod: 登记表/设计说明书 prose claims hold against the implementation', () => {
+  // The submission generator surgically patches ONLY the 六、源程序结构 count
+  // rows / grand totals (登记表 lines 37/85-93) and the 设计说明书 per-module
+  // headings. Every other sentence in these two committed docs is handwritten
+  // prose that can silently drift from the code — this test pins each claim to
+  // a source needle so a submission reviewer reading the docs gets the truth.
+  const reg = fs.readFileSync(path.join(SUBDIR, '软件著作权登记表.txt'), 'utf8');
+  const dsg = fs.readFileSync(path.join(SUBDIR, '设计说明书.txt'), 'utf8');
+  const chunkerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'chunker.js'), 'utf8');
+  const tokenizerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'tokenizer.js'), 'utf8');
+  const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
+  const extractSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'extractors.js'), 'utf8');
+  const domSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'domains.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const { DOMAINS } = require('../src/lib/domains');
+  const { fileKind } = require('../src/lib/extractors');
+
+  // ---- 四、主要功能
+  // 1. intake formats (Markdown/纯文本/PDF/DOCX/CSV FAQ) must be the real fileKind set
+  assert.match(reg, /Markdown、纯文本、PDF、DOCX、CSV/, '登记表 §四.1 must list the intake formats');
+  assert.match(dsg, /Markdown\/PDF\/DOCX\/TXT\/CSV/, '设计说明书 must list the intake formats');
+  assert.deepStrictEqual(
+    new Set(['a.md', 'a.markdown', 'a.txt', 'a.pdf', 'a.docx', 'a.csv'].map(fileKind)),
+    new Set(['markdown', 'text', 'pdf', 'docx', 'csv']),
+    'fileKind must serve exactly the formats the docs claim'
+  );
+  // 1. chunk windows 400/40
+  assert.match(reg, /400 字符窗口、40 字符重叠/, '登记表 §四.1 must state the 400/40 chunk windows');
+  assert.match(chunkerSrc, /opts\.window \|\| 400/, 'chunker must default window to 400');
+  assert.match(chunkerSrc, /opts\.overlap \?\? 40/, 'chunker must default overlap to 40');
+  // 1. idempotent re-upload (sha256 content digest)
+  assert.match(reg, /重复\s*文档上传幂等处理，不产生重复索引/, '登记表 §四.1 must promise idempotent dedup');
+  assert.match(kbSrc, /Deduplicates by sha256/, 'knowledge must dedup by content sha256');
+  assert.match(storageSrc, /getDocBySha\(sha256\)/, 'storage must look docs up by sha256');
+  // 2. FTS5 + unicode61 + bigram + BM25
+  assert.match(reg, /SQLite FTS5 \+ unicode61/, '登记表 §四.2 must name FTS5 + unicode61');
+  assert.match(storageSrc, /tokenize='unicode61'/, 'storage FTS5 must tokenize with unicode61');
+  assert.match(reg, /二元切词（bigram）/, '登记表 §四.2 must name the CJK bigram scheme');
+  assert.match(tokenizerSrc, /n = 2/, 'tokenizer must n-gram CJK runs with n=2 (bigram)');
+  assert.match(reg, /BM25 相关度排序/, '登记表 §四.2 must name BM25 ranking');
+  assert.match(storageSrc, /bm25\(fts\)/, 'storage must rank with BM25');
+  // 3. offline answer: 答案建议 + 置信度 + 引用来源 (文档名+段落号+原文摘录)
+  assert.match(reg, /答案建议 \+ 置信度 \+ 引用来源/, '登记表 §四.3 must name the answer triple');
+  assert.match(kbSrc, /mode: 'offline-retrieval'/, 'knowledge offline path must be the default answer mode');
+  assert.match(kbSrc, /llm: false/, 'offline answer must declare llm:false');
+  assert.match(kbSrc, /document: c\.filename/, 'offline citations must carry the document name');
+  assert.match(kbSrc, /paragraph: c\.chunkIndex/, 'offline citations must carry the paragraph number');
+  assert.match(kbSrc, /excerptFrom\(/, 'offline citations must carry the original excerpt');
+  // 4. domain presets: four domains, greeting/lead/fallback/systemPrompt
+  assert.match(reg, /法律（律师事务所）、医疗（诊所）、招采（中标公告）、通用/, '登记表 §四.4 must list the four domains');
+  assert.deepStrictEqual(
+    Object.keys(DOMAINS),
+    ['legal', 'medical', 'procurement', 'general'],
+    'served DOMAINS must be exactly the four the docs claim'
+  );
+  assert.match(reg, /问候语、引导语、兜底语及可选系统提示词/, '登记表 §四.4 must name the preset fields');
+  assert.match(dsg, /greeting、lead、fallback.*systemPrompt/, '设计说明书 must name the preset fields');
+  assert.ok(DOMAINS.legal.systemPrompt && DOMAINS.general.systemPrompt, 'presets must carry systemPrompt');
+  // 5. admin: 列表/分块预览/删除 + 批量上传 + 日志/统计
+  assert.match(reg, /文档管理（列表、分块预览、删除）、批量上传、查询日志/, '登记表 §四.5 must promise admin features');
+  assert.match(appSrc, /app\.get\('\/api\/admin\/docs'/, 'admin list route must exist');
+  assert.match(appSrc, /app\.get\('\/api\/admin\/docs\/:id'/, 'per-doc chunk-chunk preview route must exist');
+  assert.match(appSrc, /app\.delete\('\/api\/admin\/docs\/:id'/, 'admin delete route must exist');
+  assert.match(appSrc, /app\.post\('\/api\/admin\/upload'/, 'admin batch-upload route must exist');
+  assert.match(appSrc, /app\.get\('\/api\/admin\/logs'/, 'admin logs route must exist');
+  assert.match(appSrc, /app\.get\('\/api\/admin\/stats'/, 'admin stats route must exist');
+  assert.match(storageSrc, /queryLogStats\(\)/, 'total/hit-rate stats must come from storage');
+  // 6. widget
+  assert.match(reg, /widget\.js 脚本/, '登记表 §四.6 must name widget.js');
+  assert.match(appSrc, /app\.get\('\/widget\.js'/, 'app must serve the widget script');
+  assert.match(reg, /RAGDESK_ALLOW_ORIGIN/, '登记表 §四.6 must name the CORS env');
+  assert.match(appSrc, /RAGDESK_ALLOW_ORIGIN/, 'app must read the CORS env');
+  // 7. security/deploy
+  assert.match(reg, /x-admin-token/, '登记表 §四.7 must name the admin token header');
+  assert.match(appSrc, /req\.get\('x-admin-token'\)/, 'app must gate admin on x-admin-token');
+
+  // ---- 五、技术创新点
+  // 1. fully offline: FTS5 + BM25 only, no external LLM/embedding
+  assert.match(reg, /不依赖任何外部 LLM 或 embedding 模型/, '登记表 §五.1 must promise no external models');
+  assert.match(kbSrc, /no LLM/, 'knowledge offline answer must document the no-LLM path');
+  // 2. CJK bigram index + query expansion, in tokenizer.js
+  assert.match(reg, /CJK\s*bigram 索引扩展与查询扩词算法（tokenizer\.js）/, '登记表 §五.2 must source the bigram scheme to tokenizer.js');
+  assert.match(tokenizerSrc, /ngrams\(cjkRun, n = 2\)/, 'tokenizer must bigram CJK runs');
+  // 3. paragraph-aware chunking — drifts on 空行/single-newline must fail (chunker splits on SINGLE newlines)
+  assert.match(reg, /按换行划分段落、超长段落重叠切窗、短段落合并打包/, '登记表 §五.3 must describe the single-newline paragraph split');
+  assert.match(chunkerSrc, /split\(\/\\n\/\)/, 'chunker must split paragraphs on single newlines');
+  assert.match(chunkerSrc, /重叠切窗|overlap/, 'chunker must implement overlapping windows');
+  assert.match(dsg, /按单换行切分/, '设计说明书 3.1 must state the single-newline split');
+  // 4. traceable citations
+  assert.match(reg, /文档名、段落号与原文摘录/, '登记表 §五.4 must promise traceable citations');
+  assert.match(kbSrc, /document: c\.filename/, 'citation document field must be present');
+  // 5. light/embeddable
+  assert.match(reg, /单服务、无构建步骤/, '登记表 §五.5 must promise single-service, no build');
+  assert.match(reg, /script 标签即可/, '登记表 §五.5 must promise script-tag embedding');
+
+  // ---- 设计说明书 design modules cross-check against the docs the register cites
+  assert.match(dsg, /3\.1\s+模块 01：chunker/, '设计说明书 must carry the chunker module section');
+  assert.match(dsg, /窗口 400 \+ 重叠 40/, '设计说明书 3.1 must state 400+40 windows');
+  assert.match(dsg, /无换行（单一长段）/, '设计说明书 3.1 must describe the whole-text fallback');
+  assert.match(dsg, /tokenizer（src\/lib\/tokenizer\.js/, '设计说明书 must carry the tokenizer module section');
+  assert.match(dsg, /storage（src\/lib\/storage\.js/, '设计说明书 must carry the storage module section');
+  assert.match(dsg, /extractors（src\/lib\/extractors\.js/, '设计说明书 must carry the extractors module section');
+  assert.match(dsg, /domains（src\/lib\/domains\.js/, '设计说明书 must carry the domains module section');
+  assert.match(dsg, /knowledge（src\/lib\/knowledge\.js/, '设计说明书 must carry the knowledge module section');
+  assert.match(dsg, /app（src\/app\.js/, '设计说明书 must carry the app module section');
+  assert.match(dsg, /server（src\/server\.js/, '设计说明书 must carry the server module section');
+  assert.match(dsg, /WAL/, '设计说明书 storage section must document WAL journaling');
+  assert.match(storageSrc, /journal_mode=WAL/, 'storage must enable WAL');
+  assert.match(dsg, /foreign_keys/, '设计说明书 storage section must document FK enforcement');
+  assert.match(storageSrc, /foreign_keys=ON/, 'storage must enforce foreign keys');
+});
+
 test('prod: submission-doc generator guards fail loudly on drift', () => {
   const c = gen.computeCounts();
 
