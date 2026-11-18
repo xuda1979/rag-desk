@@ -1178,6 +1178,30 @@ test('prod: README.md feature/stack prose matches the implementation (功能/技
   assert.strictEqual(pkg.license, 'AGPL-3.0-only', 'package.json license must be AGPL-3.0-only as README states');
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'LICENSE')), 'AGPL-3.0 license text must live at project root LICENSE');
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'COMMERCIAL-LICENSE.md')), 'commercial authorization terms must live at COMMERCIAL-LICENSE.md');
+
+  // ---- license text content: the shipped LICENSE is the real AGPL, and the
+  // dual-license header cross-references the commercial terms; COMMERCIAL-LICENSE.md
+  // carries the profit-trigger clause and both name the same holder. A license
+  // record that drifted from this would falsify the software-copyright submission.
+  const licenseText = fs.readFileSync(path.join(__dirname, '..', 'LICENSE'), 'utf8');
+  const commercial = fs.readFileSync(path.join(__dirname, '..', 'COMMERCIAL-LICENSE.md'), 'utf8');
+  assert.ok(licenseText.includes('GNU AFFERO GENERAL PUBLIC LICENSE') && licenseText.includes('Version 3'),
+    'LICENSE must contain the actual AGPL-3.0 text, not a placemarker');
+  assert.match(licenseText, /GNU AGPL v3\.0/, 'LICENSE header must name GNU AGPL v3.0');
+  assert.match(licenseText, /商业使用须书面授权/, 'LICENSE header must carry the written-authorization requirement');
+  assert.match(licenseText, /许达 \(Xu Da\)/, 'LICENSE header must name the copyright holder 许达 (Xu Da)');
+  assert.ok(licenseText.includes('中国移动研究院'), 'LICENSE header must name the holder affiliation 中国移动研究院');
+  assert.ok(licenseText.includes('see COMMERCIAL-LICENSE.md'), 'LICENSE header must cross-reference the commercial terms');
+  assert.ok(commercial.includes('开源许可 + 商业授权'), 'COMMERCIAL-LICENSE.md must state the dual-licensing model');
+  assert.ok(commercial.includes('GNU Affero General Public License v3.0（AGPL-3.0）'),
+    'COMMERCIAL-LICENSE.md must grant the AGPL-3.0 open-source terms');
+  assert.ok(commercial.includes('盈利、商业收益或经营性收益'), 'COMMERCIAL-LICENSE.md must define the profit trigger');
+  assert.ok(commercial.includes('书面商业授权'), 'COMMERCIAL-LICENSE.md must require prior written authorization');
+  assert.ok(commercial.includes('许达（Xu Da）'), 'COMMERCIAL-LICENSE.md must name the copyright holder');
+  assert.ok(commercial.includes('中国移动研究院'), 'COMMERCIAL-LICENSE.md must name the holder affiliation');
+  // the three documents must agree on who the holder is, as README documents it
+  assert.match(readme, /著作权人（许达，中国移动研究院）/,
+    'README 许可 must name 许达，中国移动研究院 as the holder, like LICENSE and COMMERCIAL-LICENSE.md');
 });
 
 test('prod: browser clients (admin.js / demo.js) read exactly the JSON keys the backend actually produces', () => {
