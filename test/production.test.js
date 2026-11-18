@@ -1762,12 +1762,36 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   assert.match(storageSrc, /require\('\.\/tokenizer'\)/, 'FR2 storage must own retrieval via tokenizer');
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'public', 'admin.js')), 'FR5 admin pair must include public/admin.js');
 
-  // ---- 设计说明书 §2.6 人工处理过程（部署节点已由 §2.2 锁定；此处锁定维护流程）
+  // ---- 设计说明书 §2.6 人工处理过程（部署节点已由 §2.2 锁定；此处锁定维护流程 +
+  // 运行期无人值守 + 环境变量全部可选）
   assert.match(dsg, /维护期通过管理后台增删文档/, '设计说明书 §2.6 must document admin CRUD as the maintenance path');
+  assert.match(dsg, /运行期基本无需人工介入/, '设计说明书 §2.6 must promise a hands-free runtime');
+  assert.ok(
+    !(/(?:readline|createInterface|process\.stdin|promptSync)/.test(appSrc + serverSrc + kbSrc + storageSrc)),
+    '§2.6 hands-free: no interactive-input code path may exist in the runtime'
+  );
+  assert.ok(dsgFlat.includes('可选执行 npm run seed 预置演示语料'), '设计说明书 §2.6 must present npm run seed as optional');
+  assert.match(dsg, /配置环境变量（可选）/, '设计说明书 §2.6 must present env vars as optional');
+  // every env var the runtime reads must fall back to a built-in default, so the
+  // "配置环境变量（可选）" promise holds without any required operator setup
+  for (const [env, code] of [
+    ['PORT', 'process.env.PORT || 3000'],
+    ['RAGDESK_DB', "process.env.RAGDESK_DB || path.join(ROOT, 'data', 'ragdesk.db')"],
+    ['RAGDESK_ADMIN_TOKEN', "process.env.RAGDESK_ADMIN_TOKEN || ''"],
+    ['RAGDESK_CHAT_TOKEN', "process.env.RAGDESK_CHAT_TOKEN || ''"],
+    ['RAGDESK_ALLOW_ORIGIN', "process.env.RAGDESK_ALLOW_ORIGIN || ''"],
+  ]) {
+    assert.ok((appSrc + serverSrc).includes(code), `§2.6 optional-env: ${env} must read with a built-in default`);
+  }
 
-  // ---- 设计说明书 §2.7 尚未解决的问题（负向断言：单实例、无分布式、无多租户）
+  // ---- 设计说明书 §2.7 尚未解决的问题（负向断言：单实例、无分布式、无多租户；
+  // 以及 mock-only 摘要默认 + 调用方注入真实模型）
   assert.ok(!(/tenant|多租户/i.test(appSrc + storageSrc)), '§2.7(1) no multi-tenant isolation may exist');
   assert.ok(!/cluster/.test(serverSrc), '§2.7(2) server must not cluster (single-node as documented)');
+  assert.match(dsg, /可选 LLM 摘要路径仅内置 mock summarizer/, '设计说明书 §2.7(3) must admit the mock-only default');
+  assert.match(dsg, /真实模型需调用方注入/, '设计说明书 §2.7(3) must document caller injection for real models');
+  assert.match(kbSrc, /opts\.summarizer \|\| mockSummarizer/, '§2.7(3) a caller-supplied summarizer must win over the mock');
+  assert.match(kbSrc, /async function mockSummarizer/, '§2.7(3) the built-in default must be the local mock');
 
   // ---- 登记表 §三 开发及运行环境：language/runtime/module-system claims must
   // match package.json + storage.js exactly
