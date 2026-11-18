@@ -1744,8 +1744,25 @@ test('prod: 登记表/设计说明书 prose claims hold against the implementati
   // ---- 设计说明书 §3.9.2 内部模块接口
   assert.match(dsg, /knowledge ↔ storage（方法见 3\.3）/, '设计说明书 §3.9.2 must draw the knowledge↔storage line');
   assert.match(kbSrc, /require\('\.\/storage'\)/, 'knowledge must require storage');
+  assert.match(kbSrc, /require\('\.\/chunker'\)/, 'knowledge must require chunker');
+  assert.match(kbSrc, /require\('\.\/domains'\)/, 'knowledge must require domains');
+  assert.match(kbSrc, /require\('\.\/tokenizer'\)/, 'knowledge must require tokenizer');
+  assert.match(dsg, /knowledge ↔ chunker\/tokenizer\/\s*domains（纯函数）/, '设计说明书 §3.9.2 must draw the knowledge↔chunker/tokenizer/domains line');
+  assert.ok(!/\brequire\s*\(/.test(chunkerSrc), 'chunker.js must carry no require() to back the 纯函数 claim');
+  assert.ok(!/\brequire\s*\(/.test(tokenizerSrc), 'tokenizer.js must carry no require() to back the 纯函数 claim');
+  assert.ok(!/\brequire\s*\(/.test(domSrc), 'domains.js must carry no require() to back the 纯函数 claim');
+  assert.match(kbSrc, /chunkText\(/, 'knowledge must call chunkText as a pure function');
+  assert.match(kbSrc, /ngrams\(/, 'knowledge must call tokenizer ngrams as a pure function');
+  assert.match(kbSrc, /getDomain\(/, 'knowledge must call getDomain as a pure function');
   assert.match(dsg, /app ↔ knowledge（answer\/ingest\/log\/stats）/, '设计说明书 §3.9.2 must draw the app↔knowledge line');
   assert.match(appSrc, /kb\.answer\(String\(query\)/, 'app chat route must call kb.answer');
+  assert.match(appSrc, /kb\.ingestBuffer\(/, 'app upload route must call kb.ingestBuffer');
+  assert.match(appSrc, /kb\.logQuery\(/, 'app chat route must call kb.logQuery');
+  assert.match(appSrc, /kb\.getQueryStats\(/, 'app stats routes must call kb.getQueryStats');
+  assert.match(kbSrc, /async ingestBuffer\(/, 'knowledge must expose ingestBuffer');
+  assert.match(kbSrc, /answer\(query, opts/, 'knowledge must expose answer');
+  assert.match(kbSrc, /logQuery\(entry\)/, 'knowledge must expose logQuery');
+  assert.match(kbSrc, /getQueryStats\(\)/, 'knowledge must expose getQueryStats');
 
   // ---- 设计说明书 §3.9.3 嵌入接口（修正后：以 Bearer 鉴权表述，无 /api/health 探测）
   assert.match(dsg, /src="http:\/\/localhost:3000\/widget\.js"\s+data-api="http:\/\/localhost:3000\/api\/chat"\s+data-domain="medical"\s+data-title="诊所在线咨询">/, '设计说明书 §3.9.3 must document the data-* attributes');
