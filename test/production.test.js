@@ -2032,6 +2032,39 @@ test('prod: README opening pitch 垂直行业 RAG 客服壳 / 仅用本地 SQLit
   assert.ok(readme.includes('数据不出机器'), 'README must promise data never leaves the machine');
 });
 
+test('prod: README POST /api/chat 响应样例 (answer 检索片段+置信度说明 / confidence 0.86 / top 文档字段) 兑现为 knowledge.js 离线答案对象', () => {
+  // The README /api/chat response sample promises the offline answer object
+  // shape: answer embeds the retrieval excerpt plus a confidence note, a numeric
+  // confidence, and a top hit carrying the citation fields (docId/document/
+  // paragraph/excerpt). Each sample field must trace to the answer() return.
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+  const demoSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'demo.js'), 'utf8');
+
+  // ---- "answer": "...检索片段 + 置信度说明..."
+  assert.ok(readme.includes('"answer": "...检索片段 + 置信度说明..."'),
+    'README sample must show answer merging an excerpt with a confidence note');
+  assert.match(kbSrc, /answer: answerText,/, 'knowledge answer() must return the assembled answer string');
+  assert.match(kbSrc, /const excerpt = this\.excerptFrom\(top\.body, query\);/, 'the answer excerpt must come from the top hit body');
+  // The 置信度说明 is rendered client-side from the answer object's numeric
+  // confidence field: demo.js appends "可置信度 N%" whenever top is present.
+  assert.match(demoSrc, /const conf = data\.top \? `可置信度 \$\{Math\.round\(\(data\.confidence \|\| 0\) \* 100\)\}%` : '';/,
+    'demo.js must render the confidence note from the answer object, fulfilling the 置信度说明 promise');
+
+  // ---- "confidence": 0.86 — a numeric confidence derived from score spread
+  assert.ok(readme.includes('"confidence": 0.86'), 'README sample must show a numeric confidence');
+  assert.match(kbSrc, /confidence: top \? confidenceScore\(top, chunks\) : 0,/,
+    'answer() must ship the score-spread confidence number the sample shows');
+
+  // ---- "top": { "docId": 3, "document": "law-faq.md", "paragraph": 2, "excerpt": "…" }
+  assert.ok(readme.includes('"top": { "docId": 3, "document": "law-faq.md", "paragraph": 2, "excerpt": "…" }'),
+    'README sample must show top with the full citation field set');
+  assert.match(kbSrc, /top: top\s*\n\s*\? \{/, 'answer() must return the top-hit object under top');
+  for (const field of ['docId: top.docId', 'document: top.filename', 'paragraph: top.chunkIndex', 'excerpt: this.excerptFrom(top.body, query)']) {
+    assert.ok(kbSrc.includes(field), `top object must carry ${field} as the sample documents`);
+  }
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
