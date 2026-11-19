@@ -1103,6 +1103,46 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   assert.doesNotMatch(appSrc, /require\(['"](node:)?https?['"]\)/, 'src/app.js must not call external services');
 });
 
+test('prod: the embeddable widget and example load only self-hosted/local resources (no external URL)', () => {
+  // The AC4 pure-local promise must hold on every shipped client surface, not just
+  // the demo/admin pages pinned above: the embeddable chat float (widget.js) and
+  // the example embed page are themselves part of the offline demo story (SPEC
+  // 功能需求5 客户在线 + AC4 纯本地 demo). The widget fetches the SAME data-api
+  // endpoint the page is served from, so it must not hardcode (or reference) any
+  // external origin. Intentional local-only stand-ins stay: the usage comment
+  // documents `http://<host>:3000` (a self-hosted host placeholder, not a remote
+  // load) and the example page embeds `http://localhost:3000`.
+  const root = path.join(__dirname, '..');
+  const widgetJs = fs.readFileSync(path.join(root, 'public', 'widget.js'), 'utf8');
+  const styleCss = fs.readFileSync(path.join(root, 'public', 'style.css'), 'utf8');
+  const exampleHtml = fs.readFileSync(path.join(root, 'examples', 'embeddable.html'), 'utf8');
+
+  // Runtime resource loads must stay same-origin: `src="` / `href="` / `fetch(`
+  // may only point at a relative path, the ph `<host>` placeholder, or localhost.
+  // (style.css contains relative url() refs; the widget builds its CSS inline.)
+  const externalLoad = /(?:src|href)\s*=\s*["']https?:\/\/(?!<host>|localhost\b)/i;
+  assert.doesNotMatch(widgetJs, externalLoad, 'widget.js must not load any external script/stylesheet');
+  assert.doesNotMatch(styleCss, externalLoad, 'style.css must not load any external asset');
+  assert.doesNotMatch(exampleHtml, externalLoad, 'example embed page must not load any external script/stylesheet');
+  assert.doesNotMatch(exampleHtml + widgetJs, /fetch\(\s*["']https?:\/\/(?!<host>|localhost\b)/,
+    'widget/example must not fetch any external API');
+
+  // The widget must keep following the page's own origin (SPEC 功能需求5): the
+  // data-api attribute and fetch target are relative by default, and the shipped
+  // example proves the self-hosted wiring.
+  assert.match(widgetJs, /data-api['"']\s*\|\|\s*['"]\/api\/chat['"]|script\.getAttribute\(['"]data-api['"]\)\s*\|\|\s*['"]\/api\/chat['"]/,
+    'widget must default its chat API to the same-origin /api/chat');
+  assert.ok(widgetJs.includes("fetch(API,"), 'widget must fetch its chat API via the configured data-api');
+  assert.ok(exampleHtml.includes('localhost:3000'), 'example embed must demonstrate the localhost wiring');
+
+  // AC ensure: the widget's promises to the demo story — 引用片段 + 置信度
+  // rendering and the offline-retrieval meta line — match what the API returns
+  // (pinned in src: citations {document, paragraph}, confidence).
+  assert.match(widgetJs, /c\.document/, 'widget must render the citation source document');
+  assert.match(widgetJs, /c\.paragraph/, 'widget must render the citation paragraph number');
+  assert.ok(widgetJs.includes('置信度'), 'widget must render the confidence badge it receives');
+});
+
 test('prod: SPEC 定位/痛点/技术栈/Phases/里程碑/变现 roadmap claims hold in shipped code', () => {
   // SPEC opens with 定位/主要痛点, then fixes 技术栈, Phases P0-P3, 里程碑 M1-M3
   // and 变现. Roadmap entries with no realising artifact are spec drift as fatal
