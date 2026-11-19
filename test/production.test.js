@@ -1013,6 +1013,7 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   // ---- AC: citations are (source document + paragraph number) on the wire
   assert.match(kbSrc, /document: c\.filename/, 'citations must name the source document');
   assert.match(kbSrc, /paragraph: c\.chunkIndex/, 'citations must carry the paragraph/chunk number');
+  assert.ok(spec.includes('来源文档 + 段落号'), 'SPEC citations must promise source document + paragraph number (not 页码)');
 
   // ---- AC: offline (no LLM/embedding) answer path with 原文片段 + 置信度
   assert.match(kbSrc, /mode: 'offline-retrieval'/, 'offline answer mode must exist (SPEC 离线模式)');
