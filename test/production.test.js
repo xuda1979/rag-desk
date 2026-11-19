@@ -1077,6 +1077,93 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   assert.doesNotMatch(appSrc, /require\(['"](node:)?https?['"]\)/, 'src/app.js must not call external services');
 });
 
+test('prod: SPEC 定位/痛点/技术栈/Phases/里程碑/变现 roadmap claims hold in shipped code', () => {
+  // SPEC opens with 定位/主要痛点, then fixes 技术栈, Phases P0-P3, 里程碑 M1-M3
+  // and 变现. Roadmap entries with no realising artifact are spec drift as fatal
+  // as a dropped AC — each purchase block must map to a file, a route or a
+  // configuration that actually ships.
+  const spec = fs.readFileSync(path.join(__dirname, '..', 'SPEC.md'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const root = path.join(__dirname, '..');
+  const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+  const exists = (p) => fs.existsSync(path.join(root, p));
+  const srcText = fs
+    .readdirSync(path.join(root, 'src'), { recursive: true })
+    .filter((p) => p.endsWith('.js'))
+    .map((p) => fs.readFileSync(path.join(root, 'src', p), 'utf8'))
+    .join('\n');
+
+  // ---- 定位: 数据本地索引 + 轻量部署. SQLite stays the only store; the
+  // "向量自构建" ambition ships as the optional-v2 framing (embedding off), per
+  // 功能需求's "本地 SQLite FTS5 + 可选项向量".
+  assert.ok(spec.includes('数据本地索引'), 'SPEC 定位 must promise local data indexing');
+  assert.match(read('src/lib/storage.js'), /new DatabaseSync\(dbPath\)/, '数据本地索引 must stay on node:sqlite');
+  assert.ok(spec.includes('向量自构建'), 'SPEC 定位 keeps the 向量自构建 phrasing');
+  assert.ok(spec.includes('分块（chunk）与索引（本地 SQLite FTS5 + 可选项向量）'),
+    'SPEC 功能需求 must keep the vector index as the optional add-on over local SQLite FTS5');
+  assert.match(read('src/lib/knowledge.js'), /embedding: false/, '向量 add-on must stay off by default (v2 optional)');
+  assert.ok(spec.includes('轻量部署'), 'SPEC 定位 must promise lightweight deployment');
+  assert.ok(exists('docker-compose.yml'), '轻量部署 must ship a docker-compose.yml');
+
+  // ---- 主要痛点: 离线自托管 + 数据不出去. The offline promise must hold
+  // structurally: no src file imports an outbound http(s) client and package.json
+  // ships none.
+  assert.ok(spec.includes('离线自托管'), 'SPEC 痛点 must promise offline self-hosting');
+  assert.ok(spec.includes('数据不出去'), 'SPEC 痛点 must promise data stays on-site');
+  assert.doesNotMatch(srcText, /require\(['"](?:node:)?https?['"]\)/, '数据不出去: src must import no http(s) client');
+  assert.ok(!pkg.dependencies['node-fetch'] && !pkg.dependencies.axios && !pkg.dependencies.got,
+    '数据不出去: package.json must ship no HTTP-client dependency');
+
+  // ---- 技术栈: Node v22, SQLite FTS5 + BM25, self-built chat UI + admin, Docker Compose
+  assert.ok(spec.includes('Node v22'), 'SPEC 技术栈 must name Node v22');
+  assert.strictEqual(pkg.engines.node, '>=22.5.0', '技术栈 Node v22 must be the engines floor');
+  assert.ok(spec.includes('SQLite FTS5'), 'SPEC 技术栈 must name SQLite FTS5');
+  assert.ok(spec.includes('BM25'), 'SPEC 技术栈 must name BM25');
+  assert.match(read('src/lib/storage.js'), /bm25\(fts\) AS score/, '技术栈 BM25 must be the real ranking function');
+  assert.ok(spec.includes('中文'), 'SPEC 技术栈 must keep the Chinese-segmentation point');
+  assert.match(read('src/lib/tokenizer.js'), /function ngrams\(cjkRun, n = 2\)/, '中文分词 must be the shipped bigram CJK tokenizer');
+  assert.match(read('src/lib/storage.js'), /tokenize='unicode61'/, '中文检索 must stay on the unicode61 FTS tokenizer');
+  assert.ok(spec.includes('简单聊天 UI + admin（自建）'), 'SPEC 前端 must promise self-built chat UI + admin');
+  assert.ok(exists('public/index.html') && exists('public/widget.js') && exists('public/admin.html'),
+    '前端 must ship the chat UI, embed widget and admin');
+  assert.ok(!pkg.dependencies.react && !pkg.dependencies.vue, '前端 自建 must mean zero frontend-framework deps');
+  assert.ok(spec.includes('Docker Compose'), 'SPEC 部署 must promise Docker Compose');
+  assert.match(read('docker-compose.yml'), /^services:\s*\n\s*ragdesk:/m, '部署 compose must define the ragdesk service');
+  assert.match(read('docker-compose.yml'), /api\/health/, '部署 compose must healthcheck the health route');
+
+  // ---- Phases P0-P3: every phase maps to shipped deliverables
+  assert.ok(spec.includes('P0: 摄入 + 分块 + FTS 索引'), 'SPEC phase P0 must be 摄入+分块+FTS 索引');
+  assert.ok(exists('src/lib/chunker.js') && exists('src/lib/storage.js'), 'P0 must ship the chunker and the FTS store');
+  assert.match(read('src/lib/storage.js'), /CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5/, 'P0 FTS index must exist');
+  assert.ok(spec.includes('P1: 问答 API + 引用'), 'SPEC phase P1 must be 问答 API + 引用');
+  assert.match(read('src/lib/knowledge.js'), /answer\(query, opts = \{\}\)/, 'P1 问答 must be served by the offline answer()');
+  assert.match(read('src/app.js'), /app\.post\('\/api\/chat'/, 'P1 问答 API must be the /api/chat route');
+  assert.ok(read('src/lib/knowledge.js').includes('citations:'), 'P1 引用 must ride the citations field');
+  assert.ok(spec.includes('P2: 聊天浮窗 + admin'), 'SPEC phase P2 must be 聊天浮窗 + admin');
+  assert.ok(exists('public/widget.js') && exists('public/admin.js'), 'P2 must ship the float widget and admin UI');
+  assert.ok(spec.includes('P3: embedding 增强（可选）+ 领域模板'), 'SPEC phase P3 must be embedding-optional + 领域模板');
+  assert.ok(exists('src/lib/domains.js'), 'P3 must ship the domain template packs');
+  assert.match(read('src/lib/knowledge.js'), /embedding: false/, 'P3 embedding must stay the optional v2 enhancement');
+
+  // ---- 里程碑 M1-M3: the whole roadmap is reachable from shipped code
+  assert.ok(spec.includes('M1: FTS 检索问答（MVP）'), 'SPEC M1 must be FTS 检索问答');
+  assert.match(read('src/lib/knowledge.js'), /mode: 'offline-retrieval'/, 'M1 must be the retrieval-only answer mode');
+  assert.ok(spec.includes('M2: 引用 + API'), 'SPEC M2 must be 引用 + API');
+  assert.match(read('src/lib/knowledge.js'), /paragraph: c\.chunkIndex/, 'M2 citations must carry the paragraph number');
+  assert.ok(spec.includes('M3: 浮窗 + admin'), 'SPEC M3 must be 浮窗 + admin');
+  assert.ok(exists('public/widget.js') && exists('public/admin.html'), 'M3 must ship the float widget and admin');
+
+  // ---- 变现: 开源 self-host + 托管版订阅 — realised by the dual-license package
+  assert.ok(spec.includes('开源 self-host'), 'SPEC 变现 must promise open-source self-hosting');
+  assert.ok(spec.includes('托管版订阅'), 'SPEC 变现 must promise hosted-subscription revenue');
+  assert.strictEqual(pkg.license, 'AGPL-3.0-only', '开源 base must stay AGPL-3.0-only');
+  assert.ok(exists('COMMERCIAL-LICENSE.md'), '托管版 must be covered by the commercial license');
+  const commerce = read('COMMERCIAL-LICENSE.md');
+  assert.ok(commerce.includes('双授权'), 'commercial license must state the dual-licensing model');
+  assert.ok(commerce.includes('商业授权'), 'commercial license must govern commercial/hosted use');
+  assert.ok(commerce.includes('AGPL-3.0'), 'commercial license must reference the open-source AGPL base');
+});
+
 test('prod: README.md documents the exact API, env, limits, response shape and embed surface the code serves', () => {
   // README.md is the operational contract fed into the software-copyright
   // submission: its route table, env table, upload limits and chat response
