@@ -3197,6 +3197,15 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.match(storageSrc, /DELETE FROM docs WHERE id = \?/, 'manual §3.3 delete must remove the doc row');
   assert.match(manual, /删除后相关\s*引用即不再命中/, 'manual §3.3 must promise citations stop matching after delete');
 
+  // ---- §3.3 parse→chunk→index pipeline: the manual's 自动解析→分块→索引 order
+  // is the same three steps ingestBuffer runs (extract text → bigram chunks →
+  // persist rows), and 逐文件返回结果 is its per-file {action} contract
+  assert.match(manual, /自动解析→分块→索引，并逐文件\s*返回结果/, 'manual §3.3 must describe the parse→chunk→index pipeline');
+  assert.match(kbSrc, /await this\._extractText\(filename, buffer\)/, 'manual §3.3 自动解析 must be the extract step in ingestBuffer');
+  assert.match(kbSrc, /chunkText\(text, \{ window: 400, overlap: 40 \}\)/, 'manual §3.3 分块 must be the bigram-chunk step in ingestBuffer');
+  assert.match(kbSrc, /this\.storage\.insertChunks\(docId, chunks\)/, 'manual §3.3 索引 must be the insert step in ingestBuffer');
+  assert.match(kbSrc, /return \{ action: 'indexed', docId, chunks: chunks\.length \}/, 'manual §3.3 逐文件返回结果 must return the per-file indexed result');
+
   // ---- §3.4 stats: total / with_answer / 命中率 served by the storage query
   assert.ok(manual.includes('总查询量'), 'manual §3.4 must document the total-query stat');
   assert.match(storageSrc, /COUNT\(\*\) AS total/, 'manual 总查询量 must be a COUNT over queries_log in storage.js');
