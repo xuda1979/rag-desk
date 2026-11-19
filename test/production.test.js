@@ -1032,6 +1032,28 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   assert.ok(spec.includes('嵌入式聊天浮窗'), 'SPEC must promise the embeddable chat widget');
   assert.ok(spec.includes('API endpoint'), 'SPEC must promise the API endpoint');
 
+  // ---- AC1: SPEC keeps the 10-doc Chinese domain corpus promise
+  // (its realization — the seeded fixtures — is locked by the boot-seed >= 10 assertion elsewhere)
+  assert.ok(spec.includes('索引 10 篇领域文档'), 'SPEC AC1 must promise the 10-doc domain corpus');
+
+  // ---- AC4: the demo page is pure-local — same-origin assets/API only, no external URLs
+  assert.ok(spec.includes('无需外部 API'), 'SPEC AC4 must promise the no-external-API local demo page');
+  const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const demoSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'demo.js'), 'utf8');
+  const adminJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.js'), 'utf8');
+  assert.doesNotMatch(indexHtml + demoSrc + adminJs, /https?:\/\//, 'AC4 demo/admin pages must load no external URLs');
+  assert.ok(demoSrc.includes("fetch('/api/chat'"), 'AC4 demo must call the same-origin chat API');
+  assert.ok(demoSrc.includes("fetch('/api/domains')"), 'AC4 demo must call the same-origin domains API');
+
+  // ---- AC5: upload → auto-index → ask — the upload route ingests each file into the KB
+  assert.ok(spec.includes('上传新文档'), 'SPEC AC5 must promise upload → auto-index → ask');
+  assert.ok(appSrc.includes("upload.array('files', 20)"), 'AC5 upload must accept up to 20 files at once');
+  assert.ok(appSrc.includes('kb.ingestBuffer(f.originalname, f.buffer'), 'AC5 upload must index each uploaded file');
+
+  // ---- AC6: admin views the query log through the documented logs route
+  assert.ok(spec.includes('admin 查看查询日志'), 'SPEC AC6 must promise admin query-log viewing');
+  assert.ok(appSrc.includes('kb.getQueryLogs(limit)'), 'AC6 logs route must read the persisted query log');
+
   // ---- AC: no external API dependency in the offline path — src/ has no HTTP client
   assert.doesNotMatch(appSrc, /require\(['"](node:)?https?['"]\)/, 'src/app.js must not call external services');
 });
