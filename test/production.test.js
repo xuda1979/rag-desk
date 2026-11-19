@@ -1577,6 +1577,53 @@ test('prod: browser clients (admin.js / demo.js) read exactly the JSON keys the 
   assert.ok(demoSrc.includes("JSON.stringify({ query: q, domain: domainSelect.value })"), 'demo must submit query + domain to /api/chat');
 });
 
+test('prod: README quick-start 打开 URLs and Docker prose (healthcheck + named volume) match the deployed surface', () => {
+  // README.md lines 31-34 tell the operator to open three URLs on the default
+  // port; lines 36-42 promise `docker compose up --build` yields an image with a
+  // /api/health healthcheck and the ragdesk-data named volume. Each claim is an
+  // operator contract: a route rename, a port default drift, or a compose
+  // healthcheck/volume removal would leave the quick-start lying while the node
+  // tests stay green. Pin every README string to the source that serves it.
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+  const compose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml'), 'utf8');
+  const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
+
+  // the README quick-start block itself states the port (npm start -> 3000)
+  assert.ok(readme.includes('npm start        # 启动 http://localhost:3000'), 'quick-start must document the default port');
+  assert.match(serverSrc, /const PORT = Number\(process\.env\.PORT \|\| 3000\)/, 'port 3000 default must come from server.js');
+
+  // 演示页 -> / serves public/index.html
+  assert.ok(readme.includes('演示页：http://localhost:3000/'), 'README must list the demo URL');
+  assert.match(appSrc, /app\.get\('\/', \(_req, res\) => res\.sendFile\(path\.join\(ROOT, 'public', 'index\.html'\)\)/, 'demo URL must be served by the / route');
+
+  // 管理后台 -> /admin serves public/admin.html
+  assert.ok(readme.includes('管理后台：http://localhost:3000/admin'), 'README must list the admin URL');
+  assert.match(appSrc, /app\.get\('\/admin', \(_req, res\) => res\.sendFile\(path\.join\(ROOT, 'public', 'admin\.html'\)\)/, 'admin URL must be served by the /admin route');
+
+  // 健康检查 -> /api/health (compose probes the same endpoint)
+  assert.ok(readme.includes('健康检查：http://localhost:3000/api/health'), 'README must list the health URL');
+  assert.match(appSrc, /app\.get\('\/api\/health'/, 'health URL must be served by the /api/health route');
+  assert.match(compose, /fetch\('http:\/\/127\.0\.0\.1:3000\/api\/health'\)/, 'compose healthcheck must probe the same endpoint');
+
+  // Docker block: `docker compose up --build` must exist and match the compose service
+  assert.ok(readme.includes('docker compose up --build'), 'README must document the compose-up command');
+  assert.match(compose, /^services:\s*\n\s*ragdesk:/m, 'compose must define the ragdesk service the README starts');
+
+  // 镜像包含健康检查（/api/health）
+  assert.ok(readme.includes('镜像包含健康检查（`/api/health`）'), 'README must claim the image ships a healthcheck');
+  assert.match(compose, /healthcheck:/, 'compose must declare a healthcheck to back the claim');
+  assert.match(dockerfile, /HEALTHCHECK[^\n]*\n\s*CMD node -e/, 'Dockerfile must declare a HEALTHCHECK to back the claim');
+  assert.match(dockerfile, /\/api\/health/, 'Dockerfile HEALTHCHECK must probe /api/health');
+
+  // 数据持久化在命名卷 ragdesk-data
+  assert.ok(readme.includes('数据持久化在命名卷 `ragdesk-data`'), 'README must claim the named-volume persistence');
+  assert.match(compose, /- ragdesk-data:\/app\/data/, 'compose must mount the named volume on the DB dir');
+  assert.match(compose, /^volumes:\s*\n\s*ragdesk-data:/m, 'compose must declare the ragdesk-data volume');
+  assert.match(compose, /RAGDESK_DB=\/app\/data\/ragdesk\.db/, 'the DB must live on the persisted volume path');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
