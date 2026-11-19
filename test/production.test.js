@@ -3194,6 +3194,12 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.match(kbSrc, /action: 'indexed'/, 'manual indexed result must exist in knowledge.js');
   assert.match(kbSrc, /action: 'duplicate'/, 'manual duplicate result must exist in knowledge.js');
   assert.match(kbSrc, /action: 'error'/, 'manual error result must exist in knowledge.js');
+  // the 可多选 multi-select promise must be the file input's multiple attribute and
+  // the per-file FormData loop admin.js uses to submit more than one file at once
+  assert.ok(manual.includes('选择文件（可多选，支持 .md/.txt/.csv/.pdf/.docx）'), 'manual §3.3 must promise multi-select upload');
+  assert.match(adminHtml, /<input type="file" id="file-input"\s+multiple/, 'manual §3.3 可多选 must be the file input multiple attribute');
+  assert.ok(adminSrc.includes("const files = Array.from(fileInput.files || []);"), 'manual §3.3 可多选 must read every picked file in admin.js');
+  assert.ok(adminSrc.includes("for (const f of files) fd.append('files', f);"), 'manual §3.3 可多选 must append each file to the upload FormData');
 
   // ---- §3.3 dedup/delete mechanics: the 内容摘要 dedup hit and the delete
   // cascade that keeps 引用不再命中 are real storage paths
