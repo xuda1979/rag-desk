@@ -1624,6 +1624,48 @@ test('prod: README quick-start 打开 URLs and Docker prose (healthcheck + named
   assert.match(compose, /RAGDESK_DB=\/app\/data\/ragdesk\.db/, 'the DB must live on the persisted volume path');
 });
 
+test('prod: README 测试 coverage list maps one-to-one onto a live suite test for every claimed area', () => {
+  // README.md lines 107-110 advertise a fixed coverage list ("覆盖：..."). The
+  // claim is a contract on the test suite: for every area the README promises
+  // to cover, at least one live test must carry the matching assertion/title.
+  // A bullet that no longer matches any test (the area silently becoming
+  // untested, or the README over-promising) breaks the lock here while every
+  // individual test stays green. Each pair is [README fragment, suite needle].
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const suite = fs.readdirSync(__dirname)
+    .filter((f) => f.endsWith('.test.js'))
+    .map((f) => fs.readFileSync(path.join(__dirname, f), 'utf8'))
+    .join('\n');
+  const coverage = [
+    ['分块', 'chunker: splits long text into overlapping windows'],
+    ['中文检索命中', 'chinese bigram query finds the right chunk (AC1 core)'],
+    ['top1 片段含答案', 'chinese bigram query finds the right chunk (AC1 core)'],
+    ['引用', 'offline answer with citation'],
+    ['重复上传幂等', 'duplicate upload is idempotent (AC5)'],
+    ['删除清理', 'ingest then delete keeps index clean'],
+    ['空白语料兜底', 'answer on empty corpus gives graceful fallback'],
+    ['离线模式', 'offline mode returns answer without any LLM/embedding'],
+    ['查询日志', 'logQuery + getQueryLogs roundtrip'],
+    ['未知领域降级 general', 'unknown domain falls back to general preset'],
+    ['上传→索引→问答', 'indexes a buffered doc (AC5)'],
+    ['浮窗脚本提供', 'widget script is served and self-contained'],
+    ['data-token Bearer 令牌', 'supports RAGDESK_CHAT_TOKEN via data-token'],
+    ['/api/domains 与 /api/admin/stats', '/api/domains returns preset domains'],
+    ['鉴权令牌', 'admin endpoints are token-gated'],
+    ['CORS', 'CORS allowOrigin'],
+    ['静态页', 'static page skeletons carry'],
+    ['空文件', 'rejects an empty file'],
+    ['类型', 'rejects an unsupported file type'],
+    ['50MB', 'over the 50MB'],
+    ['20 个', 'rejects more than 20 files'],
+    ['DOCX 仅运行时依赖', 'DOCX ingest works with only runtime deps'],
+  ];
+  for (const [claim, needle] of coverage) {
+    assert.ok(readme.includes(claim), `README 测试 list must still claim ${claim}`);
+    assert.ok(suite.includes(needle), `README claims coverage of ${claim} but no live test matches "${needle}"`);
+  }
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
