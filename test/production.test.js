@@ -1021,6 +1021,7 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   assert.match(kbSrc, /answer: answerText/, 'offline answers must be rule-generated from retrieval (SPEC 检索 + 规则)');
 
   // ---- 非目标: single-tenant is not a storage abstraction — no customer_id anywhere
+  assert.ok(spec.includes('企业级多租户') && spec.includes('v1 单租户'), 'SPEC 非目标 must keep the enterprise multi-tenant out-of-scope text');
   assert.doesNotMatch(storageSrc, /customer_id|tenant_id/, 'SPEC 非目标 single-tenant must hold in storage');
 
   // ---- 非目标: no knowledge-graph machinery (graph/triple store) in the retrieval path
