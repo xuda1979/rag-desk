@@ -1957,6 +1957,43 @@ test('prod: README 功能 bullet 中文友好检索 + 离线问答 (Han 二元�
   assert.match(kbSrc, /paragraph: c\.chunkIndex,/, '引用 must carry the 段落号 from the hit chunk index');
 });
 
+test('prod: README 功能 bullet 领域预设 (prompt/模板包·可自定义 system prompt) + 嵌入浮窗 (即可使用) 兑现为 domains.js 模板域与 widget.js 自举浮窗', () => {
+  // README 功能列表第 5、7 条是两类可扩展性卖点：领域预设 = 四个垂直领域作为
+  // prompt/模板包，且 system prompt 可自定义（预设只读 → 改 domainCfg 即生效）；
+  // 嵌入浮窗 = 只贴一行 <script data-api=... data-domain=...> 标签即可使用（widget.js
+  // 自举：无依赖、防重复加载、读 data-* 属性并自行向数据 API 发问）。前序测试 pin 了
+  // 「领域预设（四个 id）」与 README 自定义领域段落，本测试首次把这两条 bullet 的
+  // 剩余承诺（prompt/模板包·可自定义·即可使用）锚到 domains.js / knowledge.js /
+  // widget.js 的实际接线。
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const domainsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'domains.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+  const widgetSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'widget.js'), 'utf8');
+
+  // ---- 领域预设 bullet：prompt/模板包 + 可自定义 system prompt
+  assert.ok(readme.includes('领域预设（法律 / 医疗 / 招采 / 通用）作为 prompt/模板包，可自定义 system prompt'),
+    'README 领域预设 bullet must describe the four presets as customizable prompt/template packs');
+  assert.match(domainsSrc, /Domain presets \(法律\/医疗\/招采\) as prompt\/template packs/,
+    'domains.js header must describe the presets as prompt/template packs');
+  assert.ok(readme.includes('可自定义 system prompt'), 'README must promise editable system prompts');
+  for (const id of ['legal', 'medical', 'procurement', 'general']) {
+    assert.match(domainsSrc, new RegExp(`${id}: \\{[\\s\\S]*?systemPrompt:`),
+      `preset ${id} must ship its own systemPrompt so the prompt is 可自定义 per domain`);
+  }
+  assert.match(kbSrc, /systemPrompt: domainCfg\.systemPrompt,/, 'the customizable systemPrompt must feed the optional summarizer');
+
+  // ---- 嵌入浮窗 bullet：贴标签即可使用 = widget.js 自举（无依赖、防重复、读 data-* 并自动发问）
+  assert.ok(readme.includes('嵌入浮窗：`<script src="/widget.js" data-api=... data-domain=...>` 即可使用'),
+    'README 嵌入浮窗 bullet must promise drop-in usage via the single script tag');
+  assert.match(widgetSrc, /\(function \(\) \{\n  'use strict';\n  if \(window\.__ragDeskWidget\) return;/, 'widget.js must be a self-contained IIFE that guards against double loading (drop-in safe)');
+  assert.match(widgetSrc, /var API = script\.getAttribute\('data-api'\) \|\| '\/api\/chat';/, 'widget must read data-api so the bullet data-api=... tag works');
+  assert.match(widgetSrc, /var DOMAIN = script\.getAttribute\('data-domain'\) \|\| 'general';/, 'widget must read data-domain so the bullet data-domain=... tag works');
+  assert.match(widgetSrc, /body: JSON\.stringify\(\{ query: q, domain: DOMAIN \}\),/,
+    'widget must itself post query+domain to the data-api endpoint (即可使用 means no host code needed)');
+  assert.match(widgetSrc, /addMsg\('bot', ans \+ '<span class="rd-meta">离线检索 · 置信度 '/,
+    'widget must render the offline answer with confidence so the dropped-in float is self-sufficient');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
