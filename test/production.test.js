@@ -1069,6 +1069,7 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   // ---- 低算力守则: SPEC keeps 不训模型 + embedding 可选; src/ ships no ML machinery
   assert.ok(spec.includes('不训模型'), 'SPEC 低算力守则 must keep the no-training constraint');
   assert.ok(spec.includes('ONNX 小模型'), 'SPEC must keep embedding-as-optional (ONNX add-on) framing');
+  assert.ok(spec.includes('检索增强按量（可关）'), 'SPEC must keep LLM metered-and-off-by-default framing');
   const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
   const srcBlob = appSrc + chunkerSrc + storageSrc + kbSrc + serverSrc;
   assert.doesNotMatch(srcBlob, /\btrain(?:ing|ed)?\b|训练|\bonnx\b|fastembed/i,
