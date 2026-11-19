@@ -1892,6 +1892,38 @@ test('prod: README POST /api/chat 样例 (request body / 条件 Bearer / law-faq
     'the response-sample referenced law-faq.md must ship in fixtures/corpus');
 });
 
+test('prod: README 功能 bullet 管理后台（上传文档 / 查看索引分块 / 查询日志与统计）兑现为 admin 路由与 knowledge 门面', () => {
+  // README 功能列表第 6 条把管理后台概括为三个动作：上传文档、查看索引分块、
+  // 查询日志与统计。这是产品开篇面向评审人的卖点句：每个动作都必须有一条真实
+  // app.js 路由 + knowledge.js 门面兑现，否则文档许诺的"管理后台"在跑起来的
+  // 服务里并不存在。前面的 spec/设计说明书 锁只 pin 了文档间的措辞一致性，
+  // 这条首次把 README 功能 bullet 直接锚到源码接线。
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+  const adminJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.js'), 'utf8');
+
+  // ---- 上传文档：multipart 路由 + 内存摄入门面
+  assert.ok(readme.includes('管理后台：上传文档、查看索引分块、查询日志与统计'),
+    'README 功能 must promise the admin surface with all three actions');
+  assert.match(appSrc, /app\.post\('\/api\/admin\/upload', upload\.array\('files', 20\), async/,
+    '上传文档 must be served by the multipart upload route');
+  assert.match(kbSrc, /async ingestBuffer\(filename, buffer, meta = \{\}\)/,
+    'the upload route must land in the knowledge ingest facade');
+
+  // ---- 查看索引分块：docs/:id 路由 + 门面把 chunk 列表交给 /api/admin/docs/:id
+  assert.match(appSrc, /app\.get\('\/api\/admin\/docs\/:id',[\s\S]*?if \(!doc\) return res\.status\(404\)[\s\S]*?const chunks = kb\.getDocChunks\(doc\.id\);[\s\S]*?res\.json\(\{ doc, chunks \}\);/, '查看索引分块 must be served by the per-doc chunks route');
+  assert.match(kbSrc, /getDocChunks\(id\) \{\n\s+return this\.storage\.listChunks\(id\);/, 'getDocChunks must fan out to storage listChunks');
+  assert.match(adminJs, /adminFetch\('\/api\/admin\/docs\/' \+ id\)/, 'admin.js must fetch the per-doc chunks as 查看索引分块 states');
+
+  // ---- 查询日志与统计：logs 路由同时携带日志与统计摘要
+  assert.match(appSrc, /res\.json\(\{ logs: kb\.getQueryLogs\(limit\), stats: kb\.getQueryStats\(\) \}\)/,
+    '查询日志与统计 must be served as the logs route pairing logs with the stats summary');
+  assert.match(kbSrc, /getQueryLogs\(limit = 100\) \{\n\s+return this\.storage\.listQueryLogs\(limit\);/, 'getQueryLogs must fan out to storage listQueryLogs');
+  assert.match(kbSrc, /getQueryStats\(\) \{\n\s+return this\.storage\.queryLogStats\(\);/, 'getQueryStats must fan out to storage queryLogStats');
+  assert.match(adminJs, /adminFetch\('\/api\/admin\/logs\?limit=50'\)/, 'admin.js must open the query log view as 查询日志与统计 states');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
