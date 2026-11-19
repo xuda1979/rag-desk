@@ -1994,6 +1994,44 @@ test('prod: README 功能 bullet 领域预设 (prompt/模板包·可自定义 sy
     'widget must render the offline answer with confidence so the dropped-in float is self-sufficient');
 });
 
+test('prod: README opening pitch 垂直行业 RAG 客服壳 / 仅用本地 SQLite FTS5 + CJK 友好分词 + BM25 做检索回答 / 数据不出机器 兑现为演示页标题与本地检索链', () => {
+  // README.md lines 1-5 are the elevator pitch: a vertical-industry RAG customer-
+  // support shell that is fully offline — local SQLite FTS5 + Chinese-friendly
+  // tokenizer + BM25 only, data never leaves the machine. The intro's sector-shell
+  // promise and its local-only sentence must trace to live code, not marketing.
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
+  const tokenizerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'tokenizer.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+
+  // ---- 垂直行业 RAG 客服壳: the intro's vertical-shell promise is echoed by the
+  // served demo-page subtitle, and the / route actually delivers that page
+  assert.ok(readme.includes('垂直行业 RAG 客服壳'), 'README must introduce the vertical-industry customer-support shell');
+  assert.match(appSrc, /app\.get\('\/', \(_req, res\) => res\.sendFile\(path\.join\(ROOT, 'public', 'index\.html'\)\)/,
+    'the shell promise must be served by the / route');
+  assert.ok(indexHtml.includes('垂直行业 RAG 客服壳'), 'public/index.html subtitle must echo the shell promise the intro names');
+
+  // ---- 仅用本地 SQLite FTS5: the local-i-only engine stays on node:sqlite
+  assert.ok(readme.includes('仅用本地 SQLite FTS5'), 'README must promise local SQLite FTS5 as the only engine');
+  assert.match(storageSrc, /require\('node:sqlite'\)/, 'the local engine must stay on node:sqlite');
+
+  // ---- CJK 友好分词: the local tokenizer header claims Chinese-friendliness
+  assert.ok(readme.includes('CJK 友好分词'), 'README must name the CJK-friendly tokenizer');
+  assert.match(tokenizerSrc, /Chinese-friendly FTS5 tokenization utilities/,
+    'tokenizer.js header must claim the Chinese-friendliness the intro promises');
+
+  // ---- BM25 做检索回答: answers come from BM25-ranked local hits via the offline path
+  assert.ok(readme.includes('BM25 做检索回答'), 'README must tie answers to BM25-ranked local retrieval');
+  assert.match(storageSrc, /bm25\(fts\) AS score/, 'answers must be ranked by the local BM25 score');
+  assert.match(kbSrc, /Answer a query in fully offline mode/,
+    'knowledge.js must implement the fully-offline answer path the intro promises');
+
+  // ---- 数据不出机器: the pitch's data-confinement phrase must stay in the README
+  assert.ok(readme.includes('数据不出机器'), 'README must promise data never leaves the machine');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
