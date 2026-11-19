@@ -1003,6 +1003,8 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   assert.match(storageSrc, /tokenize='unicode61'/, 'FTS tokenizer must stay unicode61');
 
   // ---- 领域壳: every SPEC-listed preset exists and has the documented template fields
+  assert.ok(spec.includes('预设领域配置'), 'SPEC must promise the preset domain-config shells');
+  assert.ok(spec.includes('可自定义 system prompt 模板'), 'SPEC must promise editable system-prompt templates');
   for (const id of ['legal', 'medical', 'procurement', 'general']) {
     const d = DOMAINS[id];
     assert.ok(d, `SPEC preset domain ${id} must exist`);
@@ -1016,6 +1018,7 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   assert.ok(spec.includes('来源文档 + 段落号'), 'SPEC citations must promise source document + paragraph number (not 页码)');
 
   // ---- AC: offline (no LLM/embedding) answer path with 原文片段 + 置信度
+  assert.ok(spec.includes('原文片段') && spec.includes('置信度'), 'SPEC 问答 must promise raw-fragment answers + confidence');
   assert.match(kbSrc, /mode: 'offline-retrieval'/, 'offline answer mode must exist (SPEC 离线模式)');
   assert.match(kbSrc, /llm: false/, 'LLM must default off (SPEC LLM 默认关闭)');
   assert.match(kbSrc, /answer: answerText/, 'offline answers must be rule-generated from retrieval (SPEC 检索 + 规则)');
