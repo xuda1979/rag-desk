@@ -3430,6 +3430,15 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   // ---- §5.2 Q5: the documented fallback sentence exists verbatim
   assert.ok(manual.includes('抱歉，我在知识库中暂未找到与您问题直接相关的内容。'), 'manual §5.2 Q5 must quote the not-found fallback');
   assert.match(domainText, /抱歉，我在知识库中暂未找到/, 'the manual-quoted fallback must exist in a served domain preset');
+  // ---- §5.2 Q5: the manual's no-hit advice — 属正常兜底, 换一种问法（提取核心
+  // 关键词）重试，或先上传相关资料 — must be the knowledge.js no-top branch: search
+  // first, take the top chunk or null, and on no hit answer with the domain fallback
+  assert.ok(manual.includes('属正常兜底'), 'manual §5.2 Q5 must tell users a no-hit answer is the normal fallback');
+  assert.ok(manual.includes('换一种问法（提取核心关键词）重试，或先上传相关资料'), 'manual §5.2 Q5 must advise rephrasing or uploading related docs');
+  assert.match(kbSrc, /this\.storage\.search\(query, limit\)/, 'manual §5.2 Q5 the flow must start from a storage search');
+  assert.match(kbSrc, /const top = chunks\[0\] \|\| null;/, 'manual §5.2 Q5 the top chunk must default to null on no hit');
+  assert.match(kbSrc, /if \(!top\) \{/, 'manual §5.2 Q5 the no-top branch must exist');
+  assert.match(kbSrc, /answerText = domainCfg\.fallback;/, 'manual §5.2 Q5 the no-top branch must answer with the domain fallback');
 
   // ---- §5.3 Q10: PDF parsing is pdf-parse text-layer extraction (scans lack one)
   assert.ok(manual.includes('文字层'), 'manual §5.3 Q10 must explain the text-layer dependency');
