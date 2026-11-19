@@ -3141,6 +3141,14 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   // clickable example questions must match the real demo page
   assert.ok(manual.includes('回车或点击发送'), 'manual §3.1 must document Enter/submit sending');
   assert.match(indexHtml, /<button type="submit">发送<\/button>/, 'manual §3.1 发送 button must be the demo form submit');
+  // the §3.1 layout sentence 页面中部为聊天窗口 / 在底部输入框输入问题 must be the
+  // demo page structure: the chat container above the ask form, chat first then input
+  assert.ok(manual.includes('页面中部为聊天窗口'), 'manual §3.1 must promise the middle-page chat window');
+  assert.ok(manual.includes('在底部输入框输入问题'), 'manual §3.1 must promise the bottom input box');
+  assert.match(indexHtml, /<div id="chat" class="chat"><\/div>/, 'manual §3.1 chat window must be the demo chat container');
+  assert.match(indexHtml, /<form id="ask-form" class="ask-bar">/, 'manual §3.1 bottom input must be the demo ask form');
+  assert.ok(indexHtml.indexOf('<div id="chat" class="chat"></div>') < indexHtml.indexOf('<form id="ask-form" class="ask-bar">'),
+    'manual §3.1 chat must sit above the ask form (页面中部 chat, 底部 input)');
   assert.ok(manual.includes('引用来源'), 'manual §3.1 must document the citations block');
   assert.ok(manual.includes('文档名、段落号与原文摘录'), 'manual §3.1 must describe the citation fields');
   assert.match(demoJs, /class="bot-cite"/, 'manual §3.1 citations must be rendered by demo.js');
