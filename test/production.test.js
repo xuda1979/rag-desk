@@ -1012,13 +1012,19 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
     assert.ok(typeof d.lead === 'string' && typeof d.fallback === 'string', `${id} must carry lead/fallback wording`);
   }
 
-  // ---- AC: citations are (source document + paragraph number) on the wire
+  // ---- AC2: 答案带引用 — citations are (source document + paragraph number) on the wire
+  assert.ok(spec.includes('答案带引用'), 'SPEC AC2 must promise answer-with-citation output');
   assert.match(kbSrc, /document: c\.filename/, 'citations must name the source document');
   assert.match(kbSrc, /paragraph: c\.chunkIndex/, 'citations must carry the paragraph/chunk number');
   assert.ok(spec.includes('来源文档 + 段落号'), 'SPEC citations must promise source document + paragraph number (not 页码)');
 
   // ---- AC: offline (no LLM/embedding) answer path with 原文片段 + 置信度
   assert.ok(spec.includes('原文片段') && spec.includes('置信度'), 'SPEC 问答 must promise raw-fragment answers + confidence');
+  assert.ok(spec.includes('无 LLM/embedding'), 'SPEC AC3 must promise offline answering without LLM/embedding');
+  assert.ok(spec.includes('无外部 LLM 也可运行'), 'SPEC 离线模式 must promise running without any external LLM');
+  assert.ok(spec.includes('纯检索回答'), 'SPEC 离线模式 must promise pure-retrieval answers');
+  assert.ok(spec.includes('查询 → 本地检索（FTS BM25 + 可选 embedding 混合）'),
+    'SPEC 问答 must keep the query → local retrieval pipeline');
   assert.match(kbSrc, /mode: 'offline-retrieval'/, 'offline answer mode must exist (SPEC 离线模式)');
   assert.match(kbSrc, /llm: false/, 'LLM must default off (SPEC LLM 默认关闭)');
   assert.match(kbSrc, /answer: answerText/, 'offline answers must be rule-generated from retrieval (SPEC 检索 + 规则)');
@@ -1054,8 +1060,9 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   assert.ok(appSrc.includes("upload.array('files', 20)"), 'AC5 upload must accept up to 20 files at once');
   assert.ok(appSrc.includes('kb.ingestBuffer(f.originalname, f.buffer'), 'AC5 upload must index each uploaded file');
 
-  // ---- AC6: admin views the query log through the documented logs route
+  // ---- AC6: admin views the query log + statistics through the documented logs route
   assert.ok(spec.includes('admin 查看查询日志'), 'SPEC AC6 must promise admin query-log viewing');
+  assert.ok(spec.includes('统计查询日志'), 'SPEC 功能需求4 must promise query-log statistics');
   assert.ok(appSrc.includes('kb.getQueryLogs(limit)'), 'AC6 logs route must read the persisted query log');
 
   // ---- 功能需求: the admin surface also promises 查看索引 — served by the docs-list API
