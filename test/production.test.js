@@ -3432,6 +3432,15 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.ok(adminSrc.includes("headers['x-admin-token']"), 'manual §5.4 admin must send x-admin-token');
   assert.ok(manual.includes('unauthorized'), 'manual §5.4 Q11 must name the unauthorized error');
   assert.match(appSrc, /error: 'unauthorized/, 'manual §5.4 Q11 the unauthorized payload must be served by app.js');
+  // ---- §5.4 Q11 hardening advice: the manual's fix directions — 检查请求头与
+  // RAGDESK_ADMIN_TOKEN 是否一致 / 确认 docker-compose 中已替换默认 change-me —
+  // must be the app.js header comparison and the compose production comment
+  assert.ok(manual.includes('未携带正确的 x-admin-token'), 'manual §5.4 Q11 must name x-admin-token as the header to send');
+  assert.ok(manual.includes('检查请求头与 RAGDESK_ADMIN_TOKEN'), 'manual §5.4 Q11 must tell users to check the token matches');
+  assert.ok(manual.includes('确认 docker-compose 中已替换默认 change-me'), 'manual §5.4 Q11 must tell users to replace the compose default');
+  assert.match(appSrc, /given !== adminToken/, 'manual §5.4 Q11 the token-match check must be the app.js header comparison');
+  assert.match(compose, /For production replace `change-me` before exposing the service/, 'manual §5.4 Q11 the replace-default advice must be the compose production comment');
+  assert.match(compose, /Set a strong secret to protect admin endpoints \(x-admin-token header\)/, 'manual §5.4 Q11 the x-admin-token hint must be the compose comment');
   // ---- §5.4 Q12: RAGDESK_ALLOW_ORIGIN is the CORS control
   assert.ok(manual.includes('RAGDESK_ALLOW_ORIGIN'), 'manual §5.4 Q12 must name RAGDESK_ALLOW_ORIGIN');
   assert.match(appSrc, /process\.env\.RAGDESK_ALLOW_ORIGIN/, 'manual §5.4 CORS env must be read in app.js');
