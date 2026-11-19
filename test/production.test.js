@@ -2065,6 +2065,49 @@ test('prod: README POST /api/chat 响应样例 (answer 检索片段+置信度说
   }
 });
 
+test('prod: README 技术栈 前端 full sentence 原生 HTML/CSS/JS（演示问答页 + 管理后台 + 嵌入浮窗），无构建步骤 兑现为 public/ 静态三件套与零构建脚本', () => {
+  // README 技术栈第 3 条是运维对前端的技术承诺：整句话（原生 HTML/CSS/JS、
+  // 演示问答页 + 管理后台 + 嵌入浮窗 三个交付物、无构建步骤）必须由 public/ 下
+  // 的普通静态文件与 package.json 的脚本/依赖布局兑现 —— 一旦页面变成 ES-module
+  // 源文件、引入打包器或新增 build 脚本，"无构建步骤"的承诺就失效了。
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const adminHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.html'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+
+  // ---- 技术栈 line 19 full sentence + the deliverable scope clause
+  assert.ok(readme.includes('前端：原生 HTML/CSS/JS（演示问答页 + 管理后台 + 嵌入浮窗），无构建步骤'),
+    'README 技术栈 must keep the full 前端 sentence: vanilla stack, three deliverables, no build step');
+  assert.ok(readme.includes('演示问答页 + 管理后台 + 嵌入浮窗'),
+    'README must scope the vanilla frontend to exactly demo + admin + widget');
+
+  // ---- 演示问答页 = plain static index.html wiring in the local demo.js
+  const demoScript = /<script src="\/([^"]+)"><\/script>/.exec(indexHtml);
+  assert.ok(demoScript && demoScript[1] === 'demo.js',
+    'the demo page must load public/demo.js as a plain vanilla script, no bundling');
+  assert.doesNotMatch(indexHtml, /type="module"/, 'the demo page must not require ES-module bundling (无构建步骤)');
+
+  // ---- 管理后台 = plain static admin.html wiring in the local admin.js
+  const adminScript = /<script src="\/([^"]+)"><\/script>/.exec(adminHtml);
+  assert.ok(adminScript && adminScript[1] === 'admin.js',
+    'the admin page must load public/admin.js as a plain vanilla script, no bundling');
+  assert.doesNotMatch(adminHtml, /type="module"/, 'the admin page must not require ES-module bundling (无构建步骤)');
+
+  // ---- 嵌入浮窗 = app.js serves the raw public/widget.js with no transform
+  assert.match(appSrc, /app\.use\(express\.static\(path\.join\(ROOT, 'public'\)\)\)/,
+    'public/ must be served as plain static assets, no transform pipeline');
+  assert.match(appSrc, /app\.get\('\/widget\.js',[\s\S]*?res\.type\('application\/javascript'\)\.sendFile\(path\.join\(ROOT, 'public', 'widget\.js'\)\)/,
+    'the widget must be served straight from public/widget.js with no bundling');
+
+  // ---- 无构建步骤 = package.json defines no build script and no bundler dep
+  assert.deepStrictEqual(Object.keys(pkg.scripts).sort(), ['seed', 'start', 'test'],
+    '零构建脚本: the only npm scripts are start/seed/test, exactly as the no-build promise requires');
+  assert.ok(!('build' in pkg.scripts), '零构建: package.json must not define a build script');
+  assert.ok(!('vite' in pkg.devDependencies || 'webpack' in pkg.devDependencies || 'rollup' in pkg.devDependencies),
+    '零打包器: devDependencies must not pull a bundler into the repo');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
