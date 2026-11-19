@@ -1795,6 +1795,37 @@ test('prod: README 环境变量 说明 column and 嵌入浮窗 sample map onto s
   assert.match(widgetSrc, /'Bearer ' \+ TOKEN/, 'widget.js must send the data-token as a Bearer Authorization header');
 });
 
+test('prod: README 嵌入浮窗 sample src/data-api/data-domain map onto the served /widget.js + /api/chat routes and the medical preset', () => {
+  // The 嵌入浮窗 code block is the copy-paste recipe for integrators: they take
+  // src / data-api / data-domain verbatim and drop the tag into their own site.
+  // A copied snippet only works if those three values name things the backend
+  // really serves — the /widget.js route, the /api/chat endpoint, and a preset
+  // /api/domains exposes. Previous tests pin the block's attribute vocabulary
+  // and the title/greeting/token sample values; this one ties the remaining
+  // three sample values to their app.js/widget.js/domains.js needles.
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const widgetSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'widget.js'), 'utf8');
+  const domainsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'domains.js'), 'utf8');
+
+  // src must point at the URL the app actually serves widget.js from
+  assert.ok(readme.includes('src="http://localhost:3000/widget.js"'), 'README embed sample must load the served /widget.js URL');
+  assert.match(appSrc, /app\.get\('\/widget\.js',[\s\S]*?res\.type\('application\/javascript'\)\.sendFile\(path\.join\(ROOT, 'public', 'widget\.js'\)\)/,
+    'app must serve /widget.js as application/javascript so the sample src URL resolves');
+
+  // data-api must target the chat endpoint buildApp exposes at /api/chat
+  assert.ok(readme.includes('data-api="http://localhost:3000/api/chat"'), 'README embed sample must point data-api at the served /api/chat route');
+  assert.match(appSrc, /app\.post\('\/api\/chat', chatAuth,/, 'app must expose POST /api/chat for the sample data-api path');
+  assert.match(widgetSrc, /var API = script\.getAttribute\('data-api'\) \|\| '\/api\/chat';/,
+    'widget.js must default data-api to /api/chat, the same endpoint the sample targets');
+
+  // data-domain must name a preset the backend serves via /api/domains
+  assert.ok(readme.includes('data-domain="medical"'), 'README embed sample must select the medical preset');
+  assert.match(domainsSrc, /medical: \{\n\s+id: 'medical',/, 'domains.js must define the medical preset with id medical the sample selects');
+  assert.match(widgetSrc, /var DOMAIN = script\.getAttribute\('data-domain'\) \|\| 'general';/,
+    'widget.js must honor data-domain so the sample medical selection takes effect');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
