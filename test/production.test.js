@@ -1445,6 +1445,54 @@ test('prod: README.md feature/stack prose matches the implementation (功能/技
     'README 许可 must name 许达，中国移动研究院 as the holder, like LICENSE and COMMERCIAL-LICENSE.md');
 });
 
+test('prod: README opening claims (three vertical sectors, fully-offline default, data stays local) hold end to end', () => {
+  // README.md's opening lines are the product elevator pitch: law-firm knowledge
+  // base / clinic FAQ / bid-award records as an embeddable Q&A bot, fully offline
+  // (no external LLM or embedding model by default, local SQLite FTS5 + CJK
+  // tokenizer + BM25), data never leaves the machine. Each named sector must map
+  // to a seeded fixture the engine actually ingests, each offline claim to a code
+  // needle that really runs.
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+  const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
+  const tokenizerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'tokenizer.js'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const { CORPUS_FILES } = require('../scripts/fixture-content');
+
+  // ---- sector tuple: each named vertical must be a seeded corpus fixture
+  const sectorPins = [
+    ['把律所知识库', 'law-faq.md', 'legal'],
+    ['诊所 FAQ', 'clinic-faq.md', 'medical'],
+    ['招中标资料', 'bid-announcement.md', 'procurement'],
+  ];
+  for (const [needle, fixture, domainId] of sectorPins) {
+    assert.ok(readme.includes(needle), `README opening must name the ${domainId} vertical (${needle})`);
+    assert.ok(Object.keys(CORPUS_FILES).includes(fixture), `sector ${needle} must map to the seeded fixture ${fixture}`);
+  }
+  // "可嵌入的问答 bot" — the embeddable bot must be a served route
+  assert.ok(readme.includes('做成可嵌入的问答 bot'), 'README must promise the embeddable Q&A bot');
+  assert.match(appSrc, /app\.get\('\/widget\.js',/, 'the embeddable bot must be served by the /widget.js route');
+
+  // ---- fully-offline default: no external LLM / embedding, local FTS + BM25
+  assert.ok(readme.includes('完全离线'), 'README must lead with the fully-offline property');
+  assert.ok(readme.includes('不依赖任何外部 LLM 或 embedding 模型'), 'README must promise no external LLM/embedding by default');
+  assert.match(kbSrc, /llm: false/, 'knowledge.js answer() must default the LLM off');
+  assert.match(kbSrc, /embedding: false/, 'engineInfo must report embedding off');
+  assert.match(storageSrc, /require\('node:sqlite'\)/, 'local-only indexing must stay on node:sqlite');
+  assert.match(storageSrc, /tokenize='unicode61'/, 'local FTS must stay unicode61');
+  assert.match(storageSrc, /bm25\(fts\) AS score/, 'retrieval must rank with BM25 as README states');
+  assert.match(tokenizerSrc, /overlapping n-grams \(default bigrams\)/, 'CJK-friendliness must come from the bigram tokenizer');
+
+  // ---- "数据不出机器": no outbound HTTP client in src and none shipped in deps
+  for (const rel of ['src/app.js', 'src/server.js', 'src/lib/knowledge.js', 'src/lib/storage.js', 'src/lib/extractors.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
+    assert.ok(!/require\(['"](?:node:)?https?['"]\)/.test(src), `${rel} must import no outbound http(s) client`);
+  }
+  assert.ok(!pkg.dependencies['node-fetch'] && !pkg.dependencies.axios && !pkg.dependencies.got,
+    'no HTTP-client dependency may ship under the data-stays-local promise');
+});
+
 test('prod: browser clients (admin.js / demo.js) read exactly the JSON keys the backend actually produces', () => {
   // The admin and demo pages are the third consumer of the API surface, and
   // nothing greps their source: a storage.js rename of `with_answer` /
