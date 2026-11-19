@@ -3366,6 +3366,15 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.match(appSrc, /'LIMIT_FILE_SIZE' \? 413/, '413 must map to file-too-large in app.js');
   assert.match(appSrc, /'LIMIT_UNEXPECTED_FILE' \? 400/, '400 must map to too-many-files in app.js');
 
+  // ---- §5.3 Q9 continuation: the manual's exact limits — 单文件 50MB / 单批 20 个
+  // / 拆小后分批上传 — must be the multer limits config and the two wire error messages
+  assert.ok(manual.includes('超过单文件 50MB 或单批 20 个限制'), 'manual §5.3 Q9 must state the 50MB/20-file limits');
+  assert.ok(manual.includes('拆小后分批上传'), 'manual §5.3 Q9 must tell users to split and re-upload');
+  assert.match(appSrc, /fileSize: 50 \* 1024 \* 1024\s*\}/, 'manual §5.3 Q9 单文件 50MB must be the multer byte limit in app.js');
+  assert.match(appSrc, /upload\.array\('files', 20\)/, 'manual §5.3 Q9 单批 20 个 must be the 20-per-batch array() in app.js');
+  assert.match(appSrc, /'file too large \(max 50MB\)'/, 'manual §5.3 Q9 单文件 50MB must surface as the max-50MB wire message');
+  assert.match(appSrc, /'too many files \(max 20 per upload\)'/, 'manual §5.3 Q9 单批 20 个 must surface as the max-20 wire message');
+
   // ---- §2.5 uninstall: dropping data/ragdesk.db clears all state — the whole
   // store is one SQLite file the server opens directly under the documented path
   assert.ok(manual.includes('data/ragdesk.db'), 'manual §2.5 must name the sqlite data file');
