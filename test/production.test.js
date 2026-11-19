@@ -3371,6 +3371,16 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   // ---- §5.3 Q7: the unsupported-format message exists verbatim
   assert.ok(manual.includes('不支持的文件类型'), 'manual §5.3 Q7 must quote the unsupported-format error');
   assert.match(kbSrc, /不支持的文件类型/, 'the manual-quoted unsupported-format error must exist in knowledge.js');
+  // ---- §5.3 Q7 advice: the manual's format list — 支持 .md/.markdown/.txt/
+  // .csv/.pdf/.docx；请上传上述格式 — must be the document-worthy gate: format
+  // detection recognizes exactly those extensions and the ingest route rejects
+  // everything else before any extraction
+  assert.ok(manual.includes('支持 .md/.markdown/.txt/.csv/.pdf/.docx'), 'manual §5.3 Q7 must list the supported formats');
+  assert.ok(manual.includes('请上传上述格式'), 'manual §5.3 Q7 must tell users to stay within the list');
+  assert.match(kbSrc, /isSupportedFile\(filename\) \{\n    return fileKind\(filename\) !== null;/, 'manual §5.3 Q7 the format gate must be the fileKind !== null check');
+  assert.match(kbSrc, /if \(!this\.isSupportedFile\(filename\)\) \{/, 'manual §5.3 Q7 the gate must reject before extraction');
+  assert.match(extractSrc, /case '\.markdown':/, 'manual §5.3 Q7 .markdown must be a recognized extension in extractors.js');
+  assert.match(extractSrc, /return 'markdown';/, 'manual §5.3 Q7 .markdown must map to the markdown kind');
   // ---- §5.3 Q9: 400/413 error mapping (fixed from the stale 121/413)
   assert.ok(manual.includes('上传 400/413 错误'), 'manual §5.3 Q9 must document the 400/413 codes');
   assert.match(appSrc, /'LIMIT_FILE_SIZE' \? 413/, '413 must map to file-too-large in app.js');
