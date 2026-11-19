@@ -1755,6 +1755,46 @@ test('prod: README API-table 说明 column and 技术栈 prose map onto live rou
     'the vanilla pages HTTP the 技术栈 list sits side by side in public/ with no build output');
 });
 
+test('prod: README 环境变量 说明 column and 嵌入浮窗 sample map onto server/app/widget wiring', () => {
+  // README 环境变量表每一行的 说明 是运维契约：各变量怎么读（PORT 默认 3000、
+  // RAGDESK_DB 默认 data/ragdesk.db、空 token = 开放并需 x-admin-token / Bearer
+  // 请求头、RAGDESK_ALLOW_ORIGIN 跟随请求 Origin）必须由 server.js/app.js/widget.js
+  // 兑现；嵌入浮窗示例的 data-* 属性值（medical 领域、诊所在线咨询 title、
+  // 导诊助手 greeting）必须与 domains.js/widget.js 默认一致，否则集成方照抄即错。
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const widgetSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'widget.js'), 'utf8');
+  const domainsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'domains.js'), 'utf8');
+
+  // ---- PORT / RAGDESK_DB 默认值列与 说明 列
+  assert.ok(readme.includes('`PORT`') && readme.includes('HTTP 端口'), 'README env table must define PORT as the HTTP port');
+  assert.match(serverSrc, /PORT \|\| 3000/, 'server.js must default PORT to 3000 as the table states');
+  assert.ok(readme.includes('`RAGDESK_DB`') && readme.includes('SQLite 数据库文件路径'), 'README env table must define RAGDESK_DB as the DB path');
+  assert.match(serverSrc, /RAGDESK_DB \|\| path\.join\(ROOT, 'data', 'ragdesk\.db'\)/, 'server.js must default the DB to data/ragdesk.db as the table states');
+
+  // ---- RAGDESK_ADMIN_TOKEN / RAGDESK_CHAT_TOKEN：空（开放）+ 请求头约定
+  assert.ok(readme.includes('空（开放）'), 'README env table must mark both tokens as open-by-default');
+  assert.ok(readme.includes('`x-admin-token: <token>`'), 'README must document the x-admin-token header for admin');
+  assert.match(appSrc, /req\.get\('x-admin-token'\) \|\| ''/, 'assertAdmin must read x-admin-token as the README header states');
+  assert.ok(readme.includes('`Authorization: Bearer <token>`'), 'README must document the Bearer header for chat');
+  assert.match(appSrc, /`Bearer \$\{chatToken\}`/, 'chatAuth must compare against the Bearer header the README specifies');
+
+  // ---- RAGDESK_ALLOW_ORIGIN：跟随请求 Origin（任意）→ 未设置时回显请求 Origin
+  assert.ok(readme.includes('跟随请求 Origin（任意）'), 'README must describe the reflect-request-origin default');
+  assert.ok(readme.includes('`https://docs.example.com`'), 'README must show a concrete allowed-origin example');
+  assert.match(appSrc, /allowOrigin \|\| origin/, 'app CORS must fall back to the request origin when RAGDESK_ALLOW_ORIGIN is unset');
+
+  // widget sample: data-domain/title/greeting medical 领域值 = domains.js + widget.js 默认
+  assert.ok(readme.includes('data-title="诊所在线咨询"'), 'README embed sample must use the medical demo title');
+  assert.match(domainsSrc, /'医疗 · 诊所'/, 'domains.js must ship the medical preset the embed sample selects');
+  assert.ok(readme.includes('data-greeting="您好，我是诊所在线导诊助手。"'), 'README embed sample must carry the generic medical greeting');
+  assert.match(domainsSrc, /greeting: '您好，我是诊所在线导诊助手。/, 'domains.js medical greeting must match the embed sample');
+  assert.ok(readme.includes('data-token="<chat token，仅当设置了 RAGDESK_CHAT_TOKEN 时填写>"'), 'README embed sample must document the conditional data-token');
+  assert.match(widgetSrc, /data-token'\) \|\| ''/, 'widget.js must read data-token as the embed sample documents');
+  assert.match(widgetSrc, /'Bearer ' \+ TOKEN/, 'widget.js must send the data-token as a Bearer Authorization header');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
