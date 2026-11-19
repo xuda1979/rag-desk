@@ -2180,6 +2180,45 @@ test('prod: README 功能 bullet 可选 LLM 摘要 full sentence 默认关闭 + 
     'knowledge.js must keep the built-in mockSummarizer export signature');
 });
 
+test('prod: README API 表 DELETE /api/admin/docs/:id 删除文档及其分块 兑现为 app→knowledge→storage 三级删除链与 admin 删除按钮', () => {
+  // README 的 API「其他」表（第 70 行）向运维承诺 DELETE /api/admin/docs/:id
+  // 会「删除文档及其分块」：文档行、索引分块连同 FTS 倒排一并清除。此前该行仅
+  // 有 route 存在的 fragment 钉子（app.delete 路由），「删除文档及其分块」的语义
+  // —— docs + chunks + fts 三者原子删除、查无此文档返回 404、admin 面必须真的
+  // 用 DELETE 动词发起 —— 从未被钉住。一旦存储层只删 docs 不删 chunks（孤儿分块）
+  // 或删除非原子，这句文档即失效。
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+  const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
+  const adminJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.js'), 'utf8');
+
+  // ---- full row pin: the API table must still promise 删除文档及其分块
+  assert.ok(readme.includes('| DELETE | /api/admin/docs/:id | 删除文档及其分块 |'),
+    'README API 表 must keep the full DELETE row promising doc + chunk deletion');
+
+  // ---- app.js: the route exists, 404s on a missing doc, and delegates to the facade
+  assert.match(appSrc, /app\.delete\('\/api\/admin\/docs\/:id', \(req, res\) => \{/,
+    'app.js must register the DELETE /api/admin/docs/:id route the table lists');
+  assert.match(appSrc, /if \(!doc\) return res\.status\(404\)\.json\(\{ error: 'not found' \}\);/,
+    'deleting a missing doc must 404 as a sane admin-api contract');
+  assert.match(appSrc, /kb\.deleteDoc\(doc\.id\);\n\s+res\.json\(\{ ok: true \}\)/,
+    'the DELETE route must call the knowledge facade and confirm the deletion');
+
+  // ---- knowledge.js: the facade fans out to the storage layer
+  assert.match(kbSrc, /deleteDoc\(id\) \{\n\s+return this\.storage\.deleteDoc\(id\);/, 'deleteDoc must fan out to storage deleteDoc');
+
+  // ---- storage.js: the deletion is atomic and removes fts + chunks + docs (其分块)
+  assert.match(storageSrc, /deleteDoc\(id\) \{\n\s+this\.db\.exec\('BEGIN IMMEDIATE'\);/, 'deleteDoc must run in an immediate transaction');
+  for (const table of ['DELETE FROM fts WHERE rowid = ?', 'DELETE FROM chunks WHERE doc_id = ?', 'DELETE FROM docs WHERE id = ?']) {
+    assert.ok(storageSrc.includes(table), `storage deleteDoc must ${table} to keep the index clean`);
+  }
+  assert.match(storageSrc, /this\.db\.exec\('ROLLBACK'\);\n\s+throw e;/, 'deleteDoc must roll back on failure so deletion stays atomic');
+
+  // ---- admin.js: the admin surface issues the DELETE verb for the row button
+  assert.match(adminJs, /adminFetch\('\/api\/admin\/docs\/' \+ d\.id, \{ method: 'DELETE' \}\)/, 'admin.js must delete via the DELETE method the table documents');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
