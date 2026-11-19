@@ -1924,6 +1924,39 @@ test('prod: README 功能 bullet 管理后台（上传文档 / 查看索引分�
   assert.match(adminJs, /adminFetch\('\/api\/admin\/logs\?limit=50'\)/, 'admin.js must open the query log view as 查询日志与统计 states');
 });
 
+test('prod: README 功能 bullet 中文友好检索 + 离线问答 (Han 二元切词·BM25·检索片段+置信度+引用) 兑现为 tokenizer/storage/knowledge 检索链', () => {
+  // README 功能列表第 3、4 条是检索链路的产品承诺：中文友好检索 = FTS5
+  // unicode61 + Han 部分二元切词（索引与查询两侧）+ BM25 排序；离线问答 = 从
+  // 命中分块切出「检索片段」+ confidenceScore 算「置信度」+ 返回「文档名 + 段落号」
+  // 引用。前序测试 pin 的是这些卖点的断片（unicode61 / 二元切词 / BM25 / 引用子串），
+  // 本测试首次把两条完整 bullet 逐句锚到 tokenizer.js / storage.js / knowledge.js
+  // 的实际接线，防止 README 只改卖点措辞而检索链早已换实现。
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const tokenizerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'tokenizer.js'), 'utf8');
+  const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+
+  // ---- 中文友好检索 bullet：FTS5 unicode61 + Han 二元切词（索引与查询）+ BM25 排序
+  assert.ok(readme.includes('中文友好检索：SQLite FTS5 + unicode61'),
+    'README 中文友好检索 bullet must name FTS5 + unicode61');
+  assert.ok(readme.includes('Han 部分按二元切词索引与查询'),
+    'README must scope bigram tokenization to Han runs, on both index and query');
+  assert.match(storageSrc, /tokenize='unicode61'/, 'indexing must stay on the unicode61 FTS5 tokenizer');
+  assert.match(tokenizerSrc, /const isCJK = CJK_RE\.test\(ch\);/, 'tokenizer must classify Han runs so only those get n-grammed (Han 部分)');
+  assert.match(storageSrc, /expandForIndex\(c\.text\)\.join\(' '\)/, 'index side must store the bigram expansion (按二元切词索引)');
+  assert.match(tokenizerSrc, /ngrams\(token, 2\)\.map\(\(g\) => /, 'query side must OR-group the Han bigrams (按二元切词查询)');
+  assert.match(storageSrc, /bm25\(fts\) AS score[\s\S]*?ORDER BY score ASC/, 'retrieval must rank hits by BM25 ascending as 排序 states');
+
+  // ---- 离线问答 bullet：检索片段 + 置信度 + 引用（文档名 + 段落号）
+  assert.ok(readme.includes('离线问答：返回「检索片段 + 置信度 + 引用（文档名 + 段落号）」'),
+    'README 离线问答 bullet must promise the fragment + confidence + citation triple');
+  assert.match(kbSrc, /const excerpt = this\.excerptFrom\(top\.body, query\);/, 'offline answer must cut the 检索片段 from the top-hit chunk body');
+  assert.match(kbSrc, /confidence: top \? confidenceScore\(top, chunks\) : 0,/, 'offline answer must derive 置信度 from the retrieval scores');
+  assert.match(kbSrc, /mode: 'offline-retrieval'/, 'the fragment answer must be served in offline-retrieval mode');
+  assert.match(kbSrc, /document: c\.filename,/, '引用 must carry the 文档名 from the hit file');
+  assert.match(kbSrc, /paragraph: c\.chunkIndex,/, '引用 must carry the 段落号 from the hit chunk index');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
