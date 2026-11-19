@@ -3331,6 +3331,14 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.ok(manual.includes('{ query, context, systemPrompt }'), 'manual §4.3 must document the summarizer argument shape');
   assert.match(kbSrc, /turns \{query, context, systemPrompt\} into text/, 'manual §4.3 summarizer signature must be documented in knowledge.js');
   assert.match(kbSrc, /opts\.summarizer \|\| mockSummarizer/, 'manual §4.3 summarizer must be caller-injected in knowledge.js');
+  // the manual's honesty clause — 仅用于功能演示与测试，不代表真实模型能力 — is
+  // exactly what the mock's OFF-by-default doc comment and its first-line banner
+  // (模拟 LLM 摘要，未启用真实模型。基于检索结果最相关句子作答) state in code
+  assert.ok(manual.includes('仅用于功能演示与测试'), 'manual §4.3 must scope the mock to functional demo/testing only');
+  assert.ok(manual.includes('不代表真实模型能力'), 'manual §4.3 must disclaim that the mock represents no real-model capability');
+  assert.match(kbSrc, /OFF-by-default path \(mock only\)/, 'manual §4.3 仅用于功能演示 mock-only must be the OFF-by-default doc comment in knowledge.js');
+  assert.match(kbSrc, /模拟 LLM 摘要，未启用真实模型/, 'manual §4.3 不代表真实模型能力 must be the mock banner in knowledge.js');
+  assert.match(kbSrc, /基于检索结果最相关句子作答/, 'manual §4.3 demo-scope must be the 最相关句子 answer basis in knowledge.js');
 
   // ---- §5.2 Q6: FTS query errors degrade to LIKE scan
   assert.ok(manual.includes('LIKE'), 'manual §5.2 Q6 must document the LIKE 降级 fallback');
