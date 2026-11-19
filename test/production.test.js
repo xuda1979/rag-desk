@@ -3111,12 +3111,24 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
     assert.ok(fs.existsSync(path.join(corpusDir, f)), `manual §2.4 corpus member ${f} must exist on disk`);
   }
   assert.match(manual, /法律\/诊所\/招采公告/, 'manual §2.4 must promise the 法律/诊所/招采公告 corpus');
+  const seedSrc = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'seed-fixtures.js'), 'utf8');
+
+  // the §2.4 opening sentence is the first-run conditional-seed contract: the
+  // manual's 首次启动（源码或 Docker）时，系统会自动检测数据库是否已初始化 and
+  // 保证初次打开即能演示问答 must be the server boot gate — `[seed] already
+  // seeded` is the skip path when the DB was initialized on an earlier boot, and
+  // ensureCorpusFiles is what materializes the 演示语料 the manual promises
+  assert.ok(manual.includes('首次启动（源码或 Docker）'), 'manual §2.4 must scope auto-seed to first start on either install path');
+  assert.ok(manual.includes('系统会自动检测数据库是否已初始化'), 'manual §2.4 must promise auto-detection of DB initialization');
+  assert.ok(manual.includes('保证初次打开即能演示问答'), 'manual §2.4 must promise the demo is ready on first open');
+  assert.match(serverSrc, /\[seed\] already seeded/, 'manual §2.4 init check must skip seeding when the DB already initialized');
+  assert.match(serverSrc, /seed the fixture corpus on first run so the demo is live/, 'manual §2.4 初次打开即能演示 must be the server boot seed gate');
+  assert.match(seedSrc, /async function ensureCorpusFiles\(\)/, 'manual §2.4 演示语料 must be materialized by ensureCorpusFiles');
 
   // ---- §2.4 manual seed reset: RAGDESK_DB relocates the DB and `npm run seed`
   // re-ingests the demo corpus — the manual's documented reset path. The seed is
   // sha256-idempotent (skips docs already in storage via getDocBySha) and defaults
   // to force=false, so re-running it never duplicates or destroys content.
-  const seedSrc = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'seed-fixtures.js'), 'utf8');
   assert.ok(manual.includes('RAGDESK_DB 改变数据库路径'), 'manual §2.4 must document the RAGDESK_DB path override');
   assert.ok(manual.includes('npm run seed 手动重置'), 'manual §2.4 must document the npm run seed manual reset');
   assert.match(pkg.scripts.seed, /scripts\/seed-fixtures\.js/, 'manual §2.4 npm run seed must resolve to scripts/seed-fixtures.js');
