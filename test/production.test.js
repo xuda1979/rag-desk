@@ -3047,6 +3047,16 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.ok(manual.includes('易嵌入'), 'manual §1.2 must claim easy embedding');
   assert.match(appSrc, /app\.get\('\/widget\.js'/, 'manual §1.2 widget script must be served by app.js');
   assert.match(appSrc, /res\.type\('application\/javascript'\)/, 'manual §1.2 widget.js must be served as JS');
+  // ---- §1.2 易嵌入: the manual's one-line-drop-in promise — 一段 script 标签
+  // 即可把问答浮窗嵌入任意网站 — must be widget.js's self-bootstrap: it binds to
+  // the very tag that loaded it (document.currentScript, falling back to the last
+  // script tag), guards double-loading via __ragDeskWidget, and reads every
+  // data-* option off that same tag (data-api first, defaulting to /api/chat)
+  assert.ok(manual.includes('一段 script 标签即可把问答浮窗嵌入任意网站'), 'manual §1.2 must promise one-tag embed into any website');
+  assert.match(widgetSrc, /var script = document\.currentScript \|\| \(function \(\) \{/, 'manual §1.2 one-tag embed binds to the tag that loaded it via currentScript');
+  assert.match(widgetSrc, /var s = document\.getElementsByTagName\('script'\);/, 'manual §1.2 currentScript-less pages must fall back to the last script tag');
+  assert.match(widgetSrc, /getAttribute\('data-api'\) \|\| '\/api\/chat'/, 'manual §1.2 the embed must read the data-api option from the same tag');
+  assert.match(widgetSrc, /if \(window\.__ragDeskWidget\) return;/, 'manual §1.2 the embed must be drop-in safe via the single-instance guard');
   assert.ok(manual.includes('轻量化'), 'manual §1.2 must claim lightweight operation');
   assert.ok(manual.includes('单进程运行'), 'manual §1.2 must promise single-process runtime');
   assert.match(serverSrc, /app\.listen\(PORT/, 'manual §1.2 single process must be the one server listen');
