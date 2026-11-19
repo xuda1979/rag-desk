@@ -1058,6 +1058,13 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   assert.ok(spec.includes('查看索引'), 'SPEC must promise the admin index-viewing surface');
   assert.ok(appSrc.includes('kb.getAllDocs()'), '查看索引 must be served by the docs-list API');
 
+  // ---- AC7: tests + README + Chinese domain corpus all ship (the submission's verification trio)
+  assert.ok(spec.includes('测试 + README + 领域示例语料'), 'SPEC AC7 must promise tests, README and the corpus');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'README.md')), 'AC7 README must exist');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'scripts', 'seed-fixtures.js')), 'AC7 corpus must have a seed entrypoint');
+  const corpusCount = fs.readdirSync(path.join(__dirname, '..', 'fixtures', 'corpus')).length;
+  assert.ok(corpusCount === 10, `AC7 corpus must ship the 10 domain files, got ${corpusCount}`);
+
   // ---- AC: no external API dependency in the offline path — src/ has no HTTP client
   assert.doesNotMatch(appSrc, /require\(['"](node:)?https?['"]\)/, 'src/app.js must not call external services');
 });
