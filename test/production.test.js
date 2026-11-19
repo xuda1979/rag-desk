@@ -1054,6 +1054,10 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   assert.ok(spec.includes('admin 查看查询日志'), 'SPEC AC6 must promise admin query-log viewing');
   assert.ok(appSrc.includes('kb.getQueryLogs(limit)'), 'AC6 logs route must read the persisted query log');
 
+  // ---- 功能需求: the admin surface also promises 查看索引 — served by the docs-list API
+  assert.ok(spec.includes('查看索引'), 'SPEC must promise the admin index-viewing surface');
+  assert.ok(appSrc.includes('kb.getAllDocs()'), '查看索引 must be served by the docs-list API');
+
   // ---- AC: no external API dependency in the offline path — src/ has no HTTP client
   assert.doesNotMatch(appSrc, /require\(['"](node:)?https?['"]\)/, 'src/app.js must not call external services');
 });
