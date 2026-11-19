@@ -791,6 +791,40 @@ test('prod: server.js exits 0 promptly on SIGTERM and SIGINT (graceful Docker st
   fs.rmSync(bootDir, { recursive: true, force: true });
 });
 
+test('prod: server.js boot banner names the real routes, offline mode and admin token state', () => {
+  // The listen-callback console.log block is the operator's first-run surface:
+  // README quick-start (演示页/管理后台/健康检查) and 用户手册 §2.2 ("启动成功后
+  // 控制台会打印访问地址，默认端口 3000") promise exactly the URLs the banner
+  // prints. The banner line and the single Admin/DB lines are pinned elsewhere;
+  // the Demo/Health/Mode/admin-token lines could still drift without a test
+  // noticing. Every line is cross-pinned to the route or semantic it labels.
+  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+
+  // each advertised URL must be a route app.js actually serves
+  assert.match(serverSrc, /RAG-Desk running at http:\/\/localhost:\$\{PORT\}/, 'banner must print the running URL');
+  assert.match(serverSrc, /Demo:\s+http:\/\/localhost:\$\{PORT\}\//, 'banner must advertise the demo page URL');
+  assert.match(appSrc, /app\.get\('\/', \(_req, res\) => res\.sendFile\(path\.join\(ROOT, 'public', 'index\.html'\)\)/, 'demo URL must resolve to index.html');
+  assert.match(serverSrc, /Admin:\s+http:\/\/localhost:\$\{PORT\}\/admin/, 'banner must advertise the admin URL');
+  assert.match(appSrc, /app\.get\('\/admin', \(_req, res\) => res\.sendFile\(path\.join\(ROOT, 'public', 'admin\.html'\)\)/, 'admin URL must resolve to admin.html');
+  assert.match(serverSrc, /Health:\s+http:\/\/localhost:\$\{PORT\}\/api\/health/, 'banner must advertise the health URL');
+  assert.match(appSrc, /app\.get\('\/api\/health'/, 'health URL must be a served app route');
+  assert.match(serverSrc, /DB:\s+\$\{DB_PATH\}/, 'banner must print the DB path');
+
+  // Mode: line must state the same offline contract /api/health returns
+  assert.match(serverSrc, /Mode:\s+offline retrieval \(LLM & embedding disabled\)/, 'banner must state the offline mode');
+  assert.match(appSrc, /mode: 'offline'/, 'offline banner must match the health payload mode');
+  assert.match(appSrc, /llmEnabled: false/, 'LLM-disabled banner must match the health payload');
+
+  // admin token line: the open/token-gated split must key off the same env var
+  // the README env table and docker-compose 'change-me' default document
+  assert.match(
+    serverSrc,
+    /process\.env\.RAGDESK_ADMIN_TOKEN \? 'token-gated' : 'open \(set RAGDESK_ADMIN_TOKEN to protect\)'/,
+    'banner must trace the admin token state to RAGDESK_ADMIN_TOKEN'
+  );
+});
+
 test('prod: docker-compose.yml env wiring matches the keys src/server.js actually reads', () => {
   // Deploying via `docker compose up` is the documented path (README lines 36-42).
   // server.js reads exactly five env keys: PORT, RAGDESK_DB, RAGDESK_ADMIN_TOKEN,
