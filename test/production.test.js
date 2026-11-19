@@ -2145,6 +2145,41 @@ test('prod: README 功能 bullet 知识摄入 格式清单 Markdown / PDF / DOCX
     'extractors.js must export the dispatchers the README format list relies on');
 });
 
+test('prod: README 功能 bullet 可选 LLM 摘要 full sentence 默认关闭 + 可注入自定义 summarizer（mock 已内置用于测试）兑现为 answerWithLlm 注入契约', () => {
+  // README 功能第 6 条对运维承诺整条可选 LLM 摘要语义：默认关闭、调用方可注入
+  // 自定义 summarizer、内置 mock 仅供测试。此前 可选 LLM 摘要/默认关闭 与
+  // mock 已内置用于测试 只是零散 fragment 钉子，整句话与「可注入自定义
+  // summarizer」子句从未作为 README 承诺被钉住 —— 一旦 answerWithLlm 的注入
+  // 契约（caller summarizer 优先、{query,context,systemPrompt} 输入、内置
+  // mock 兜底）漂移，这句文档即失效。
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+
+  // ---- full sentence pin: 默认关闭 + 可注入自定义 summarizer + mock 用于测试
+  assert.ok(readme.includes('可选 LLM 摘要：默认关闭，可注入自定义 summarizer（mock 已内置用于测试）'),
+    'README 功能 must keep the full 可选 LLM 摘要 sentence: off by default, injectable summarizer, mock built in for tests');
+
+  // ---- 默认关闭: the doc comment states the OFF-by-default contract, and the
+  // mock is the default the caller must override
+  assert.match(kbSrc, /OFF by default; the caller passes a/, 'answerWithLlm must document the off-by-default contract');
+  assert.ok(kbSrc.includes('We keep a\n   * mock here for tests.'),
+    'knowledge.js must state the mock summarizer exists for tests, fulfilling 内置用于测试');
+
+  // ---- 可注入自定义 summarizer: the caller-supplied summarizer must win (the
+  // injection point), driving opts.summarizer over the built-in mock
+  assert.match(kbSrc, /const summarizer = opts\.summarizer \|\| mockSummarizer;/,
+    'the caller-supplied summarizer must override the mock, fulfilling 可注入自定义 summarizer');
+
+  // ---- the injected summarizer receives {query, context, systemPrompt}
+  assert.match(kbSrc, /const answer = await summarizer\(\{\n\s+query,\n\s+context,\n\s+systemPrompt: domainCfg\.systemPrompt,\n\s+\}\);/,
+    'the injected summarizer must be called with query/context/systemPrompt as the injection contract states');
+
+  // ---- mock 已内置用于测试: the shipped mock is the default summarizer body
+  assert.ok(kbSrc.includes('未启用真实模型'), 'the built-in mock summarizer must state no real model is used, keeping 内置用于测试 honest');
+  assert.ok(kbSrc.includes('async function mockSummarizer({ query, context })'),
+    'knowledge.js must keep the built-in mockSummarizer export signature');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
