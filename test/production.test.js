@@ -1065,6 +1065,14 @@ test('prod: SPEC.md design claims (formats, chunking, FTS5/BM25, domains, offlin
   const corpusCount = fs.readdirSync(path.join(__dirname, '..', 'fixtures', 'corpus')).length;
   assert.ok(corpusCount === 10, `AC7 corpus must ship the 10 domain files, got ${corpusCount}`);
 
+  // ---- 低算力守则: SPEC keeps 不训模型 + embedding 可选; src/ ships no ML machinery
+  assert.ok(spec.includes('不训模型'), 'SPEC 低算力守则 must keep the no-training constraint');
+  assert.ok(spec.includes('ONNX 小模型'), 'SPEC must keep embedding-as-optional (ONNX add-on) framing');
+  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+  const srcBlob = appSrc + chunkerSrc + storageSrc + kbSrc + serverSrc;
+  assert.doesNotMatch(srcBlob, /\btrain(?:ing|ed)?\b|训练|\bonnx\b|fastembed/i,
+    '低算力守则 must hold: src/ ships no training or model-loading machinery');
+
   // ---- AC: no external API dependency in the offline path — src/ has no HTTP client
   assert.doesNotMatch(appSrc, /require\(['"](node:)?https?['"]\)/, 'src/app.js must not call external services');
 });
