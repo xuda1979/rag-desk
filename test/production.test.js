@@ -1826,6 +1826,38 @@ test('prod: README 嵌入浮窗 sample src/data-api/data-domain map onto the ser
     'widget.js must honor data-domain so the sample medical selection takes effect');
 });
 
+test('prod: README 自定义领域 措辞字段 (lead/fallback/footer·systemPrompt·answerWithLlm injection) 兑现为 knowledge.js 离线答案组装', () => {
+  // README 自定义领域 is the extension recipe: adding a domain entry in
+  // src/lib/domains.js is enough, systemPrompt feeds the optional LLM path, and
+  // lead/fallback/footer alone control the offline answer wording. A custom
+  // domain whose wording fields drift from the offline assembler would look
+  // configured while answers silently ignore it — so pin each claim to the
+  // knowledge.js code that actually consumes those fields.
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+
+  // 增加条目即可: domains.js is a plain object map the backend loads directly
+  assert.ok(readme.includes('增加条目即可'), 'README must promise adding a domains.js entry is enough');
+  assert.match(kbSrc, /const \{ getDomain \} = require\('\.\/domains'\)/, 'knowledge.js must load presets from domains.js by id');
+  assert.match(appSrc, /const \{ getDomain, domainIds \} = require\('\.\/lib\/domains'\)/, 'app.js must load the same domains.js map for /api/domains');
+
+  // systemPrompt 使用于可选 LLM: the field must feed answerWithLlm, not offline
+  assert.ok(readme.includes('`systemPrompt` 使用于可选 LLM 摘要'), 'README must scope systemPrompt to the optional LLM summarizer');
+  assert.match(kbSrc, /systemPrompt: domainCfg\.systemPrompt,/, 'answerWithLlm must pass the preset systemPrompt into the summarizer');
+
+  // lead/fallback/footer 控制离线答案措辞: the offline assembler must consume
+  // all three exactly as README claims
+  assert.ok(readme.includes('`lead/fallback/footer` 控制离线答案措辞'), 'README must claim the offline wording comes from lead/fallback/footer');
+  assert.match(kbSrc, /if \(!top\) \{\n\s+answerText = domainCfg\.fallback;/, 'offline answer must use fallback when retrieval finds nothing');
+  assert.match(kbSrc, /const lead = domainCfg\.lead;/, 'offline assembler must read lead from the domain preset');
+  assert.match(kbSrc, /answerText = `\$\{lead\}\\n\\n\$\{excerpt\}\\n\\n\$\{domainCfg\.footer\}`\.trim\(\);/, 'offline answer must wrap the excerpt with lead + footer');
+
+  // 可注入自定义 kb.answerWithLlm({summarizer}): the injection point must exist
+  assert.ok(readme.includes('可注入自定义 `kb.answerWithLlm({summarizer})`'), 'README must document the answerWithLlm injection point');
+  assert.match(kbSrc, /answerWithLlm\(query, opts = \{\}\)/g, 'knowledge.js must expose the answerWithLlm injectable summarizer path');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
