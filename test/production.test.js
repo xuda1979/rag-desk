@@ -2108,6 +2108,43 @@ test('prod: README 技术栈 前端 full sentence 原生 HTML/CSS/JS（演示问
     '零打包器: devDependencies must not pull a bundler into the repo');
 });
 
+test('prod: README 功能 bullet 知识摄入 格式清单 Markdown / PDF / DOCX / 纯文本 / CSV（FAQ）兑现为 extractors.js 分发与 knowledge.js 摄入路由', () => {
+  // README 功能第 1 条对运维承诺五类输入格式（CSV 标注 FAQ、DOCX/PDF 二进制）。
+  // 该清单此前只在 SPEC 层被钉住，README 层的生产承诺空缺：一旦某格式的解析
+  // 路径在 extractors.js 分发或 knowledge.js 摄入路由上被移除，README 的
+  // 摄入承诺即失效。本测试把整段格式清单钉到两条链路上。
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const extractSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'extractors.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+
+  // ---- README bullet intake-formats half（该句话的前半段；自动分块后半段已由
+  // 分块测试在 400 窗口/40 重叠处另行钉住，这里不重复）
+  assert.ok(readme.includes('知识摄入：Markdown / PDF / DOCX / 纯文本 / CSV（FAQ）'),
+    'README 功能 must promise the five intake formats: Markdown / PDF / DOCX / 纯文本 / CSV（FAQ）');
+
+  // ---- 文本族格式经 textFromBuffer 的扩展名分发读取为 UTF-8
+  assert.match(extractSrc, /case '\.md':\n    case '\.markdown':\n    case '\.txt':\n      return buffer\.toString\('utf8'\);/,
+    'textFromBuffer must read Markdown (.md/.markdown) and 纯文本 (.txt) as UTF-8, per the README intake list');
+  assert.match(extractSrc, /case '\.csv':\n      return parseCsv\(buffer\.toString\('utf8'\)\)/,
+    'CSV（FAQ）must route through the in-house parseCsv, matching the FAQ semantic the README names');
+
+  // ---- 二进制格式经 knowledge.js 摄入路由走专用解析器
+  assert.match(kbSrc, /if \(ext === '\.pdf'\) \{\n      return await extractPdf\(buffer\);/,
+    'knowledge.js must route PDF intake through extractPdf, fulfilling PDF in the README intake list');
+  assert.match(kbSrc, /if \(ext === '\.docx'\) \{\n      return extractDocx\(buffer\);/,
+    'knowledge.js must route DOCX intake through extractDocx, fulfilling DOCX in the README intake list');
+
+  // ---- 清单其余成员落到 textFromBuffer，未知扩展名则明确拒绝而非静默入库
+  assert.match(kbSrc, /const t = textFromBuffer\(filename, buffer\);\n    if \(t !== null\) return t;/,
+    'knowledge.js must fall back to textFromBuffer for the text-family intake formats');
+  assert.match(kbSrc, /throw new Error\(`不支持的文件格式: \$\{filename \|\| '\?'\}`\);/,
+    'intake outside the five README formats must be refused with a clear error');
+
+  // ---- 分发器必须导出，摄入路由才可触达
+  assert.match(extractSrc, /module\.exports = \{ parseCsv, extractDocx, extractPdf, textFromBuffer, fileKind \};/,
+    'extractors.js must export the dispatchers the README format list relies on');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
