@@ -3156,6 +3156,16 @@ test('prod: 用户手册.txt operating claims hold against the implementation', 
   assert.ok(manual.includes('RAGDESK_ADMIN_TOKEN'), 'manual §3.2 must name RAGDESK_ADMIN_TOKEN');
   assert.ok(adminSrc.includes("'ragdesk-admin-token'"), 'admin.js must persist the token under the manual-documented key');
   assert.ok(adminSrc.includes("headers['x-admin-token']"), 'admin.js must send x-admin-token as the manual documents');
+  // ---- §3.2 conditional token gate: 若部署时设置了 RAGDESK_ADMIN_TOKEN → 首次进入
+  // 后台会要求输入访问令牌 → 输入后会话内生效 — the 401→prompt→persist flow (the
+  // gate engages only when a token is configured; the first token-less request prompts
+  // once; the entered value survives reloads and is retried once instead of re-prompting)
+  assert.match(manual, /若部署时设置了 RAGDESK_ADMIN_TOKEN，首次进入后台会要求输入访问\s*令牌（x-admin-token）；输入后会话内生效/, 'manual §3.2 must promise the conditional admin token gate flow');
+  assert.match(appSrc, /if \(!adminToken\) return next\(\);/, 'manual §3.2 若部署时设置了 must keep admin open until a token is configured');
+  assert.ok(adminSrc.includes('if (res.status === 401 && !retried) {'), 'manual §3.2 首次进入后台会要求输入 must prompt on the first token-less 401');
+  assert.ok(adminSrc.includes("let token = localStorage.getItem(TOKEN_KEY) || '';"), 'manual §3.2 会话内生效 must keep the saved token across page loads');
+  assert.ok(adminSrc.includes('localStorage.setItem(TOKEN_KEY, token);'), 'manual §3.2 输入后 must persist the entered token for the session');
+  assert.ok(adminSrc.includes('return adminFetch(url, opts, true); // retry once'), 'manual §3.2 会话内生效 must retry once with the token instead of re-prompting');
   // the doc list column the manual describes must be the one admin.html renders
   assert.ok(manual.includes('文件名、类型、分块、大小、上传时间'), 'manual §3.2 doc-list parenthetical must match admin.html column order');
   assert.match(adminHtml, /<th>文件名<\/th><th>类型<\/th><th>分块<\/th><th>大小<\/th><th>上传时间<\/th>/, 'manual §3.2 doc-list column order must match admin.html');
