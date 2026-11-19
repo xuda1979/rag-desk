@@ -1509,6 +1509,48 @@ test('prod: package.json scripts, engines, main and deps stay consistent with th
   );
 });
 
+test('prod: package-lock.json stays a valid, complete, tracked lockfile for npm ci', () => {
+  // Both Dockerfile stages run `npm ci` (build with devDeps, runtime with
+  // --omit=dev), which hard-fails if the lockfile is absent, stale or out of
+  // sync with package.json. A lockfile-only or manifest-only bump would ship a
+  // container that cannot be built as documented, so every field that could
+  // silently drift between the two files is pinned here.
+  const lock = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package-lock.json'), 'utf8'));
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const root = lock.packages[''];
+
+  // npm ci requires lockfileVersion 2/3 (npm >= 7); lockfile v1 is install-only.
+  assert.ok([2, 3].includes(lock.lockfileVersion), 'package-lock.json must use a modern lockfileVersion (2 or 3) for npm ci');
+
+  // The metadata root must mirror package.json exactly: npm install bumps name
+  // /version / license / engines in both, and `npm ci` resolves nothing from
+  // the manifest — a mismatch here means the lock records a different package.
+  assert.strictEqual(root.name, pkg.name, 'lockfile root name must match package.json name');
+  assert.strictEqual(root.version, pkg.version, 'lockfile root version must match package.json version');
+  assert.strictEqual(root.license, pkg.license, 'lockfile root license must match package.json license');
+  assert.deepStrictEqual(root.engines, pkg.engines, 'lockfile root engines must match package.json engines');
+
+  // Runtime deps live in root.dependencies (npm normally) or nested — whichever
+  // layout the lock uses, every prod dep must have a resolved node_modules entry
+  // or `npm ci --omit=dev` in the runtime stage fails.
+  const lockProd = { ...(root.dependencies || {}) };
+  for (const name of Object.keys(pkg.dependencies)) {
+    assert.ok(lock.packages[`node_modules/${name}`], `lockfile must resolve prod dep ${name} for the runtime npm ci`);
+    assert.strictEqual(lockProd[name], pkg.dependencies[name], `lockfile must record ${name} at the package.json specifier`);
+  }
+
+  // Root devDependencies must match package.json too, and the dev-only build
+  // tool (pdfkit) must be absent from prod dependencies so --omit=dev really
+  // strips it (pdfkit is notorious for pulling native deps into the image).
+  assert.deepStrictEqual(root.devDependencies || {}, pkg.devDependencies, 'lockfile root devDependencies must match package.json');
+  assert.ok(!('pdfkit' in (root.dependencies || {})), 'pdfkit must stay out of lockfile prod dependencies');
+  assert.ok(lock.packages['node_modules/pdfkit'], 'lockfile must still resolve pdfkit for the build-stage npm ci');
+
+  // The lockfile is a commit-time artifact: if it stops being tracked, `npm ci`
+  // inside the Dockerfile silently builds from a stale lock or none at all.
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'package-lock.json')), 'package-lock.json must exist on disk');
+});
+
 test('prod: committed corpus fixtures stay byte-identical to their generating source modules', () => {
   // seedIfNeeded's sha256 pre-check (skip unchanged) assumes the committed
   // files under fixtures/corpus ARE exactly what ensureCorpusFiles() would
