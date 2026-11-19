@@ -1666,6 +1666,41 @@ test('prod: README 测试 coverage list maps one-to-one onto a live suite test f
   }
 });
 
+test('prod: README env-var prose (open-by-default + browser token prompt) matches app.js, admin.js and compose', () => {
+  // README.md lines 86-87 (env-var section tail) make two operator-facing
+  // claims: with no token set the product behaves exactly like the fully
+  // offline demo, and once RAGDESK_ADMIN_TOKEN is configured the admin UI
+  // prompts for the token in the browser. Both must stay true in the shipped
+  // surface: app.js keeps every gate open on a blank token, the offline default
+  // is the health endpoint's llmEnabled:false, compose turns the admin gate on
+  // with change-me for production, and admin.js implements the prompt.
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const adminJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.js'), 'utf8');
+  const compose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml'), 'utf8');
+
+  // 未设置任何 token 时功能与完全离线 demo 一致: blank tokens leave every
+  // gate open (dev default), and the health endpoint advertises the offline
+  // engine with LLM off — the exact demo parity the README promises.
+  assert.ok(readme.includes('默认（未设置任何 token）时功能与完全离线 demo 一致'), 'README must state the open-by-default contract');
+  assert.match(appSrc, /opts\.adminToken \|\| process\.env\.RAGDESK_ADMIN_TOKEN \|\| ''/, 'blank admin token must keep /api/admin open');
+  assert.match(appSrc, /opts\.chatToken \|\| process\.env\.RAGDESK_CHAT_TOKEN \|\| ''/, 'blank chat token must keep /api/chat open');
+  assert.match(appSrc, /if \(!adminToken\) return next\(\);/, 'the admin gate must only engage when a token is configured');
+  assert.match(appSrc, /llmEnabled: false/, 'the health endpoint must advertise LLM-off for the offline-demo parity');
+
+  // 生产对外暴露时建议至少设置 RAGDESK_ADMIN_TOKEN: compose's production
+  // wiring must actually turn the admin gate on (change-me placeholder).
+  assert.ok(readme.includes('`RAGDESK_ADMIN_TOKEN`'), 'README must recommend RAGDESK_ADMIN_TOKEN for production exposure');
+  assert.match(compose, /RAGDESK_ADMIN_TOKEN=change-me/, 'compose must default the admin gate on with the change-me placeholder');
+  assert.match(appSrc, /req\.get\('x-admin-token'\)/, 'admin.js must be able to pass the token the README says it prompts for');
+
+  // 管理后台会在浏览器中提示输入令牌: admin.js must implement the browser
+  // prompt and send the entered value as x-admin-token.
+  assert.ok(readme.includes('管理后台会在浏览器中提示输入令牌'), 'README must promise the browser token prompt');
+  assert.match(adminJs, /prompt\('该后台需要访问令牌（RAGDESK_ADMIN_TOKEN），请输入：'\)/, 'admin.js must prompt for the admin token in the browser');
+  assert.ok(adminJs.includes("headers['x-admin-token'] = token"), 'the prompted token must ride the x-admin-token header');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
