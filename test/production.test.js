@@ -1701,6 +1701,60 @@ test('prod: README env-var prose (open-by-default + browser token prompt) matche
   assert.ok(adminJs.includes("headers['x-admin-token'] = token"), 'the prompted token must ride the x-admin-token header');
 });
 
+test('prod: README API-table 说明 column and 技术栈 prose map onto live routes and source needles', () => {
+  // README 的 API 短说明列（/api/health 引擎状态与领域列表、/api/domains 领域预设含示例问题、
+  // /api/admin/docs 已索引文档列表含分块数、/api/admin/logs 查询日志含统计摘要、/api/admin/stats
+  // 查询量统计字段、/widget.js 嵌入式浮窗脚本）和 技术栈 承诺（node:sqlite 无需编译本地依赖、
+  // 自研 CSV/纯文本解析器、原生 HTML/CSS/JS）是面向集成方的契约：每个短句都必须由一条真实路由
+  // 或源模块兑现，否则接线漂移后文档会描述一个不存在的接口。
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const storageSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'storage.js'), 'utf8');
+  const extractorsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'extractors.js'), 'utf8');
+
+  // ---- /api/health：引擎状态、领域列表
+  assert.ok(readme.includes('引擎状态、领域列表'), 'README API-table must describe /api/health as engine state + domain list');
+  assert.match(appSrc, /res\.json\(\{[\s\S]*?engine: kb\.engineInfo\(\),[\s\S]*?domains: domainIds\(\)/,
+    'health route must serve engineInfo + domainIds as the 引擎状态、领域列表 claim states');
+
+  // ---- /api/domains：领域预设（含示例问题）
+  assert.ok(readme.includes('领域预设（含示例问题）'), 'README API-table must describe /api/domains as presets with example questions');
+  assert.match(appSrc, /examples: getDomain\(id\)\.exampleQuestions/,
+    'domains route must expose per-domain exampleQuestions to back the 含示例问题 claim');
+
+  // ---- /api/admin/docs：已索引文档列表（含分块数）
+  assert.ok(readme.includes('已索引文档列表（含分块数）'), 'README API-table must describe the docs list with chunk count');
+  assert.match(appSrc, /app\.get\('\/api\/admin\/docs',[\s\S]*?docs: kb\.getAllDocs\(\)/,
+    'docs route must serve the full doc list as the 已索引文档列表 claim states');
+  assert.match(storageSrc, /AS chunk_count/, 'listDocs must aggregate chunk_count to back the 含分块数 claim');
+
+  // ---- /api/admin/logs：查询日志（含统计摘要）
+  assert.ok(readme.includes('查询日志（含统计摘要）'), 'README API-table must describe the logs route with a stats summary');
+  assert.match(appSrc, /res\.json\(\{ logs: kb\.getQueryLogs\(limit\), stats: kb\.getQueryStats\(\) \}\)/,
+    'logs route must pair the query log with the stats summary the 含统计摘要 claim states');
+
+  // ---- /api/admin/stats：查询量统计（总查询 / 有回答命中 / 命中率）
+  assert.ok(readme.includes('查询量统计（总查询 / 有回答命中 / 命中率）'), 'README API-table must describe the stats fields');
+  assert.match(storageSrc, /SELECT COUNT\(\*\) AS total,[\s\S]*?AS with_answer/,
+    'queryLogStats must compute total + with_answer to back the 总查询 / 有回答命中 fields');
+
+  // ---- /widget.js：嵌入式聊天浮窗脚本
+  assert.ok(readme.includes('嵌入式聊天浮窗脚本'), 'README API-table must describe /widget.js as the embeddable widget script');
+  assert.match(appSrc, /app\.get\('\/widget\.js',[\s\S]*?res\.type\('application\/javascript'\)\.sendFile/,
+    'widget route must serve widget.js as application/javascript per the 嵌入式浮窗 script claim');
+
+  // ---- 技术栈：无需编译本地依赖、自研 CSV/纯文本、原生 HTML/CSS/JS
+  assert.ok(readme.includes('无需编译本地依赖'), 'README 技术栈 must promise no native build dependencies');
+  assert.match(storageSrc, /require\('node:sqlite'\)/, 'storage must import node:sqlite so no native module ever compiles');
+  assert.ok(readme.includes('自研 CSV/纯文本'), 'README 技术栈 must claim in-house CSV/plain-text parsers');
+  assert.match(extractorsSrc, /function parseCsv/, 'extractors.js must implement the in-house CSV parser the 自研 CSV claim names');
+  assert.ok(readme.includes('原生 HTML/CSS/JS'), 'README 技术栈 must claim vanilla HTML/CSS/JS');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'public', 'index.html'))
+    && fs.existsSync(path.join(__dirname, '..', 'public', 'admin.html'))
+    && fs.existsSync(path.join(__dirname, '..', 'public', 'widget.js')),
+    'the vanilla pages HTTP the 技术栈 list sits side by side in public/ with no build output');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
