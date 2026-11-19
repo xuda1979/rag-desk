@@ -1858,6 +1858,40 @@ test('prod: README 自定义领域 措辞字段 (lead/fallback/footer·systemPro
   assert.match(kbSrc, /answerWithLlm\(query, opts = \{\}\)/g, 'knowledge.js must expose the answerWithLlm injectable summarizer path');
 });
 
+test('prod: README POST /api/chat 样例 (request body / 条件 Bearer / law-faq.md 引用) 兑现为 app.js 处理器与领域语料', () => {
+  // README /api/chat 段落是集成方照抄的调用契约：请求体样例的 query 必须是
+  // 自带语料真能回答的、domain 必须是真实预设；「当设置 RAGDESK_CHAT_TOKEN 时
+  // 需附带 Bearer 头」必须兑现为 chatAuth 的条件门；响应样例的引用必须指向
+  // fixtures 真文件名。样例与实现漂移会让照抄的调用方拿 404/401 或错误领域。
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  const kbSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'knowledge.js'), 'utf8');
+  const domainsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'domains.js'), 'utf8');
+  const lawFaq = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'corpus', 'law-faq.md'), 'utf8');
+
+  // 请求体样例：query 是在自带 legal 语料中真实存在的问句，domain 是真实预设
+  assert.ok(readme.includes('{ "query": "律师咨询费怎么收取？", "domain": "legal" }'),
+    'README must show the exact /api/chat request body with query + domain');
+  assert.ok(lawFaq.includes('律师咨询费怎么收取'), 'the sample query must be answerable from the shipped law-faq.md corpus');
+  assert.match(appSrc, /const \{ query, domain, limit \} = req\.body \|\| \{\};/,
+    'app.js must read the query/domain fields the README sample sends');
+  assert.match(appSrc, /kb\.answer\(String\(query\)\.trim\(\), \{ domain,/, 'app.js must route body query/domain into knowledge.answer');
+  assert.match(domainsSrc, /legal: \{\n\s+id: 'legal',/, 'the sample domain legal must be a real preset in domains.js');
+
+  // 条件 Bearer：RAGDESK_CHAT_TOKEN 未设时开放，设置后需精确 Bearer 头
+  assert.ok(readme.includes('当设置 `RAGDESK_CHAT_TOKEN` 时，需附带请求头 `Authorization: Bearer <token>`'),
+    'README must scope the Bearer requirement to when RAGDESK_CHAT_TOKEN is set');
+  assert.match(appSrc, /if \(!chatToken\) return next\(\);/, 'chatAuth must stay open when RAGDESK_CHAT_TOKEN is unset');
+  assert.match(appSrc, /auth !== `Bearer \$\{chatToken\}`/, 'chatAuth must require the exact Bearer token the README states');
+
+  // 响应样例引用必须指到真实 shipped 语料文件 + knowledge 返回该文件名
+  assert.ok(readme.includes('"citations": [{ "docId": 3, "document": "law-faq.md", "paragraph": 2, "excerpt": "…" }]'),
+    'README response sample must cite law-faq.md as the document');
+  assert.match(kbSrc, /document: c\.filename/, 'knowledge citations must return the corpus filename the sample shows');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'fixtures', 'corpus', 'law-faq.md')),
+    'the response-sample referenced law-faq.md must ship in fixtures/corpus');
+});
+
 test('prod: package.json scripts, engines, main and deps stay consistent with the documented contract', () => {
   // package.json is the operator-facing install/run contract: npm start / npm
   // seed / npm test are the exact commands README.md and Dockerfile document.
