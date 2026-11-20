@@ -4,6 +4,19 @@
   "description": "RAG-Desk: 垂直行业 RAG 客服壳（律所/诊所/中标公告）— offline-first local RAG customer support shell",
   "type": "commonjs",
   "main": "src/server.js",
+  "keywords": [
+    "rag",
+    "retrieval-augmented-generation",
+    "knowledge-base",
+    "rag-desk",
+    "offline",
+    "sqlite-fts5",
+    "chinese-nlp",
+    "chatbot",
+    "self-hosted"
+  ],
+  "author": "许达 / 中国移动研究院 (Xu Da, China Mobile Research Institute)",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server.js",
     "seed": "node --disable-warning=ExperimentalWarning scripts/seed-fixtures.js",
@@ -12,7 +25,6 @@
   "engines": {
     "node": ">=22.5.0"
   },
-  "license": "AGPL-3.0-only",
   "dependencies": {
     "express": "^4.22.3",
     "fflate": "^0.8.3",
